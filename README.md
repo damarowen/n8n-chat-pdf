@@ -73,7 +73,7 @@ n8n-workflows/
 │   └── tsconfig.json
 ├── docs/
 │   ├── react-migration-plan.md          # Migration design document
-│   └── PROJECT_OVERVIEW.md              # This file
+│   └── README.md                        # This file
 ├── workflows/
 │   └── n8n-damar/
 │       ├── n8n-chatbot-pdf-gdrive-gemini.workflow.ts
