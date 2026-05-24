@@ -1,0 +1,24 @@
+{
+  "version": 4,
+  "activeEnvironmentId": "n8n-damar-2",
+  "environmentTargets": [
+    {
+      "id": "n8n-damar",
+      "name": "n8n damar",
+      "kind": "external-instance",
+      "url": "https://nein.damarowen.blog"
+    }
+  ],
+  "environments": [
+    {
+      "id": "n8n-damar-2",
+      "name": "n8n damar",
+      "syncSlug": "n8n-damar",
+      "environmentTargetId": "n8n-damar",
+      "projectId": "personal",
+      "projectName": "Personal",
+      "workflowsPath": "workflows/n8n-damar",
+      "folderSync": true
+    }
+  ]
+}
