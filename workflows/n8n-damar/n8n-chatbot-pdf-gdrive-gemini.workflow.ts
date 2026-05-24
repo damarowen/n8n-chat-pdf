@@ -141,7 +141,8 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
     DefaultDataLoader = {
         dataType: 'binary',
         binaryMode: 'specificField',
-        binaryPropertyName: 'data',
+        loader: 'auto',
+        binaryDataKey: 'data',
         options: {},
     };
 
@@ -165,6 +166,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         position: [528, -80],
     })
     StickyNote = {
+        color: 1,
         content: `SUMMARY: JALUR INGESTION (LIBRARY BUILDER)
 
 Source: Google Drive (Folder: Buat Kerja)
@@ -221,7 +223,7 @@ HISTORY PERCAKAPAN:
         retryOnFail: true,
     })
     GoogleGeminiChatModel = {
-        modelName: 'models/gemini-1.5-flash',
+        modelName: 'models/gemini-2.5-flash',
         options: {
             temperature: 0.1,
         },
@@ -352,6 +354,7 @@ HISTORY PERCAKAPAN:
         position: [688, -448],
     })
     StickyNote1 = {
+        color: 1,
         content: `Trigger: Dimulai saat ada pesan masuk melalui Chat Trigger.
 
 Memory: Menggunakan node Postgres Chat Memory yang terhubung ke tabel chat_history. Ini berfungsi agar AI ingat konteks obrolan sebelumnya (menggunakan sessionId).
