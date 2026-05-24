@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : n8n-chatbot-pdf-gdrive-gemini
-// Nodes   : 20  |  Connections: 9
+// Nodes   : 20  |  Connections: 11
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -19,14 +19,14 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // PostgresChatMemory                 memoryPostgresChat         [creds] [ai_memory]
 // EmbeddingsGoogleGemini1            embeddingsGoogleGemini     [creds] [ai_embedding]
 // SupabaseVectorStore1               vectorStoreSupabase        [AI] [creds] [ai_tool]
-// WhenChatMessageReceived            chatTrigger
 // IfFileUploaded                     if
+// ChatUploadWebhook                  webhook
 // UploadAcknowledgement              set
+// PrepareForAi                       set
 // StickyNote1                        stickyNote
 // EditFields                         set
 // If_                                if
-// ChatUiWebhook                      webhook
-// HtmlChatResponse                   respondToWebhook
+// ReturnResponse                     set
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
@@ -34,14 +34,15 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //    → DownloadFile
 //      → SupabaseVectorStore
 //        → UploadAcknowledgement
-// WhenChatMessageReceived
+//          → PrepareForAi
+//            → AiAgent
+//              → If_
+//                → EditFields
+//               .out(1) → ReturnResponse
+// ChatUploadWebhook
 //    → IfFileUploaded
 //      → SupabaseVectorStore (↩ loop)
-//     .out(1) → AiAgent
-//        → If_
-//          → EditFields
-// ChatUiWebhook
-//    → HtmlChatResponse
+//     .out(1) → PrepareForAi (↩ loop)
 //
 // AI CONNECTIONS
 // SupabaseVectorStore.uses({ ai_embedding: EmbeddingsGoogleGemini, ai_document: [DefaultDataLoader] })
@@ -195,6 +196,7 @@ Input: Application/PDF (Binary) -> Process: Parse  -> Split (1000 text) -> Vecto
         onError: 'continueRegularOutput',
     })
     AiAgent = {
+        text: '={{ $json.chatInput }}',
         options: {
             systemMessage: `Anda adalah Asisten Virtual yang bertugas menjawab pertanyaan berdasarkan dokumen yang diberikan.
 
@@ -238,7 +240,9 @@ HISTORY PERCAKAPAN:
         credentials: { postgres: { id: 'yoe8aj2syp3VHrNe', name: 'Postgres account' } },
     })
     PostgresChatMemory = {
+        sessionKey: '={{ $json.sessionId }}',
         tableName: 'chat_history',
+        contextWindowLength: 5,
     };
 
     @node({
@@ -274,26 +278,6 @@ HISTORY PERCAKAPAN:
     };
 
     @node({
-        id: 'b88a1ca8-79b1-4e91-8560-7e12d78db270',
-        webhookId: '31a47c8c-aaee-4182-a6c5-6da629ab1cc0',
-        name: 'When chat message received',
-        type: '@n8n/n8n-nodes-langchain.chatTrigger',
-        version: 1.4,
-        position: [-160, -688],
-        retryOnFail: false,
-    })
-    WhenChatMessageReceived = {
-        public: true,
-        initialMessages:
-            "Hi there! I'm Nathan. Feel free to ask me anything about Damar's professional profile. You can also upload a PDF and I will index it automatically.",
-        options: {
-            allowFileUploads: true,
-            acceptedMimeTypes: ['application/pdf'],
-            uploadBinaryPropertyName: 'data',
-        },
-    };
-
-    @node({
         id: 'f58b9e9f-2e1b-4a1f-b5a6-1f7f8b9c3d21',
         name: 'If File Uploaded',
         type: 'n8n-nodes-base.if',
@@ -301,6 +285,7 @@ HISTORY PERCAKAPAN:
         position: [-16, -688],
     })
     IfFileUploaded = {
+        looseTypeValidation: true,
         conditions: {
             options: {
                 caseSensitive: true,
@@ -311,7 +296,7 @@ HISTORY PERCAKAPAN:
             conditions: [
                 {
                     id: '7f3c0c8d-2c7e-4f2a-bf8c-2b7e2d7b1c9a',
-                    leftValue: '={{ $binary.data }}',
+                    leftValue: '={{ $binary.data.fileName }}',
                     rightValue: '',
                     operator: {
                         type: 'string',
@@ -322,6 +307,21 @@ HISTORY PERCAKAPAN:
             ],
             combinator: 'and',
         },
+        options: {},
+    };
+
+    @node({
+        id: 'e1f2a3b4-c5d6-7890-abcd-ef1234567890',
+        webhookId: 'chat-upload-id',
+        name: 'Chat Upload Webhook',
+        type: 'n8n-nodes-base.webhook',
+        version: 2,
+        position: [-352, -688],
+    })
+    ChatUploadWebhook = {
+        path: 'chat-upload',
+        httpMethod: 'POST',
+        responseMode: 'lastNode',
         options: {},
     };
 
@@ -347,6 +347,35 @@ HISTORY PERCAKAPAN:
     };
 
     @node({
+        id: 'a4b5c6d7-e8f9-0a1b-2c3d-4e5f6a7b8c9d',
+        name: 'Prepare For AI',
+        type: 'n8n-nodes-base.set',
+        version: 3.4,
+        position: [400, -624],
+    })
+    PrepareForAi = {
+        mode: 'manual',
+        include: 'none',
+        assignments: {
+            assignments: [
+                {
+                    id: 'c9d0e1f2-3a4b-5c6d-7e8f-9a0b1c2d3e4f',
+                    name: 'chatInput',
+                    value: '={{ $("Chat Upload Webhook").item.json.body.chatInput }}',
+                    type: 'string',
+                },
+                {
+                    id: 'f0a1b2c3-d4e5-6f78-9abc-def012345678',
+                    name: 'sessionId',
+                    value: '={{ $("Chat Upload Webhook").item.json.body.sessionId }}',
+                    type: 'string',
+                },
+            ],
+        },
+        options: {},
+    };
+
+    @node({
         id: '3dab5c2a-8dd4-45b4-a2b2-0b0a46e59314',
         name: 'Sticky Note1',
         type: 'n8n-nodes-base.stickyNote',
@@ -355,17 +384,17 @@ HISTORY PERCAKAPAN:
     })
     StickyNote1 = {
         color: 1,
-        content: `Trigger: Dimulai saat ada pesan masuk melalui Chat Trigger.
+        content: `Trigger: ChatUploadWebhook (POST /webhook/chat-upload)
 
-Memory: Menggunakan node Postgres Chat Memory yang terhubung ke tabel chat_history. Ini berfungsi agar AI ingat konteks obrolan sebelumnya (menggunakan sessionId).
+Memory: Postgres Chat Memory di tabel chat_history (per sessionId).
 
-Agentic Reasoning: AI Agent bertindak sebagai konduktor. Saat user bertanya, Agent tidak langsung menjawab, tapi memanggil Tool (Supabase Vector Store).
+Agentic Reasoning: AI Agent bertindak sebagai konduktor. Saat user bertanya, Agent memanggil Tool (Supabase Vector Store).
 
-The Search: Melalui fungsi RPC match_documents, database mencari potongan resume yang paling relevan dengan pertanyaan user berdasarkan kemiripan vektor.
+The Search: match_documents mencari chunk paling relevan berdasarkan semantic similarity.
 
-Final Answer: Google Gemini menerima pertanyaan user + potongan resume yang relevan, lalu menyusun jawaban final yang akurat.
+Final Answer: Google Gemini 2.5 Flash menyusun jawaban dari context yang ditemukan.
 
-jika error akan menampilkan default message error`,
+Jika error: menampilkan pesan Maaf banget...`,
         height: 352,
         width: 608,
     };
@@ -424,178 +453,18 @@ jika error akan menampilkan default message error`,
     };
 
     @node({
-        id: 'a1b2c3d4-e5f6-7890-abcd-ef1234567890',
-        webhookId: 'chat-ui-webhook-id',
-        name: 'Chat UI Webhook',
-        type: 'n8n-nodes-base.webhook',
-        version: 2,
-        position: [-352, 128],
+        id: 'f1a2b3c4-d5e6-7890-abcd-ef0123456789',
+        name: 'Return Response',
+        type: 'n8n-nodes-base.set',
+        version: 3.4,
+        position: [512, -640],
     })
-    ChatUiWebhook = {
-        path: 'chat-ui',
-        httpMethod: 'GET',
-        responseMode: 'responseNode',
-        options: {},
-    };
-
-    @node({
-        id: 'b2c3d4e5-f6a7-8901-bcde-f12345678901',
-        name: 'HTML Chat Response',
-        type: 'n8n-nodes-base.respondToWebhook',
-        version: 1.1,
-        position: [-128, 128],
-    })
-    HtmlChatResponse = {
-        respondWith: 'text',
-        responseBody: `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Nathan AI - Document Chat Assistant</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        .message { animation: fadeIn 0.3s ease-in; }
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .typing-indicator span { animation: typing 1.4s infinite; }
-        @keyframes typing { 0%, 60%, 100% { opacity: 0.3; } 30% { opacity: 1; } }
-    </style>
-</head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
-    <div class="container mx-auto max-w-4xl h-screen flex flex-col p-4">
-        <!-- Header -->
-        <div class="bg-white rounded-t-2xl shadow-lg p-6 border-b">
-            <h1 class="text-3xl font-bold text-gray-800">🤖 Nathan AI</h1>
-            <p class="text-gray-600 mt-1">Document Chat Assistant - Ask me anything about uploaded documents</p>
-        </div>
-
-        <!-- Chat Messages -->
-        <div id="chatMessages" class="bg-white flex-1 overflow-y-auto p-6 space-y-4"></div>
-
-        <!-- Input Area -->
-        <div class="bg-white rounded-b-2xl shadow-lg p-6 border-t">
-            <div id="uploadStatus" class="hidden mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p class="text-sm text-blue-700">📄 <span id="fileName"></span></p>
-            </div>
-            <div class="flex gap-3">
-                <input type="file" id="fileInput" accept="application/pdf" class="hidden">
-                <button onclick="document.getElementById('fileInput').click()" class="px-4 py-3 bg-indigo-100 hover:bg-indigo-200 text-indigo-700 rounded-xl transition">
-                    📎
-                </button>
-                <input type="text" id="messageInput" placeholder="Type your message or upload a PDF..." 
-                    class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500">
-                <button onclick="sendMessage()" class="px-6 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-semibold transition">
-                    Send
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const WEBHOOK_URL = 'https://nein.damarowen.blog/webhook/31a47c8c-aaee-4182-a6c5-6da629ab1cc0/chat';
-        let sessionId = 'session-' + Date.now();
-        let selectedFile = null;
-
-        document.getElementById('fileInput').addEventListener('change', (e) => {
-            selectedFile = e.target.files[0];
-            if (selectedFile) {
-                document.getElementById('uploadStatus').classList.remove('hidden');
-                document.getElementById('fileName').textContent = selectedFile.name;
-            }
-        });
-
-        document.getElementById('messageInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
-
-        function addMessage(text, isUser) {
-            const messagesDiv = document.getElementById('chatMessages');
-            const messageDiv = document.createElement('div');
-            messageDiv.className = \`message flex \${isUser ? 'justify-end' : 'justify-start'}\`;
-            messageDiv.innerHTML = \`
-                <div class="\${isUser ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-800'} rounded-2xl px-5 py-3 max-w-lg shadow">
-                    <p class="whitespace-pre-wrap">\${text}</p>
-                </div>
-            \`;
-            messagesDiv.appendChild(messageDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-
-        function showTyping() {
-            const messagesDiv = document.getElementById('chatMessages');
-            const typingDiv = document.createElement('div');
-            typingDiv.id = 'typing';
-            typingDiv.className = 'flex justify-start';
-            typingDiv.innerHTML = \`
-                <div class="bg-gray-100 rounded-2xl px-5 py-3 shadow typing-indicator">
-                    <span class="inline-block w-2 h-2 bg-gray-400 rounded-full mr-1"></span>
-                    <span class="inline-block w-2 h-2 bg-gray-400 rounded-full mr-1" style="animation-delay: 0.2s"></span>
-                    <span class="inline-block w-2 h-2 bg-gray-400 rounded-full" style="animation-delay: 0.4s"></span>
-                </div>
-            \`;
-            messagesDiv.appendChild(typingDiv);
-            messagesDiv.scrollTop = messagesDiv.scrollHeight;
-        }
-
-        function removeTyping() {
-            const typing = document.getElementById('typing');
-            if (typing) typing.remove();
-        }
-
-        async function sendMessage() {
-            const input = document.getElementById('messageInput');
-            const message = input.value.trim();
-            
-            if (!message && !selectedFile) return;
-
-            if (message) addMessage(message, true);
-            input.value = '';
-
-            showTyping();
-
-            try {
-                const formData = new FormData();
-                formData.append('chatInput', message);
-                formData.append('sessionId', sessionId);
-                
-                if (selectedFile) {
-                    formData.append('data', selectedFile);
-                    document.getElementById('uploadStatus').classList.add('hidden');
-                    selectedFile = null;
-                }
-
-                const response = await fetch(WEBHOOK_URL, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const data = await response.json();
-                removeTyping();
-                
-                const reply = data.output || data.message || 'No response received';
-                addMessage(reply, false);
-            } catch (error) {
-                removeTyping();
-                addMessage('❌ Error: ' + error.message, false);
-            }
-        }
-
-        // Initial greeting
-        addMessage("Hi there! I'm Nathan. Feel free to ask me anything about Damar's professional profile. You can also upload a PDF and I will index it automatically.", false);
-    </script>
-</body>
-</html>`,
-        options: {
-            responseCode: 200,
-            responseHeaders: {
-                entries: [
-                    {
-                        name: 'Content-Type',
-                        value: 'text/html',
-                    },
-                ],
-            },
+    ReturnResponse = {
+        includeOtherFields: true,
+        assignments: {
+            assignments: [],
         },
+        options: {},
     };
 
     // =====================================================================
@@ -606,13 +475,15 @@ jika error akan menampilkan default message error`,
     defineRouting() {
         this.WhenClickingExecuteWorkflow.out(0).to(this.DownloadFile.in(0));
         this.DownloadFile.out(0).to(this.SupabaseVectorStore.in(0));
-        this.WhenChatMessageReceived.out(0).to(this.IfFileUploaded.in(0));
+        this.ChatUploadWebhook.out(0).to(this.IfFileUploaded.in(0));
         this.IfFileUploaded.out(0).to(this.SupabaseVectorStore.in(0));
-        this.IfFileUploaded.out(1).to(this.AiAgent.in(0));
+        this.IfFileUploaded.out(1).to(this.PrepareForAi.in(0));
         this.SupabaseVectorStore.out(0).to(this.UploadAcknowledgement.in(0));
+        this.UploadAcknowledgement.out(0).to(this.PrepareForAi.in(0));
+        this.PrepareForAi.out(0).to(this.AiAgent.in(0));
         this.AiAgent.out(0).to(this.If_.in(0));
         this.If_.out(0).to(this.EditFields.in(0));
-        this.ChatUiWebhook.out(0).to(this.HtmlChatResponse.in(0));
+        this.If_.out(1).to(this.ReturnResponse.in(0));
 
         this.SupabaseVectorStore.uses({
             ai_embedding: this.EmbeddingsGoogleGemini.output,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type ChatRole = "user" | "assistant" | "system";
 
@@ -12,7 +12,7 @@ type ChatMessage = {
 
 const endpoint =
   process.env.NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL ??
-  "https://nein.damarowen.blog/webhook/31a47c8c-aaee-4182-a6c5-6da629ab1cc0/chat";
+  "https://nein.damarowen.blog/webhook/chat-upload";
 
 const genId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -39,31 +39,65 @@ function extractReplyText(payload: unknown): string {
   return "No response text returned from webhook.";
 }
 
+function getHasUploaded(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.sessionStorage.getItem("n8n-chat-has-uploaded") === "true";
+}
+
+function setHasUploaded(value: boolean) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem("n8n-chat-has-uploaded", value ? "true" : "false");
+}
+
 export default function Chat() {
+  const [hasUploaded, setHasUploadedState] = useState<boolean>(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "assistant-welcome",
       role: "assistant",
-      text: "Hi! Send a message or upload a PDF to add context.",
+      text: "Hi! Please upload a PDF first so I can answer your questions.",
     },
   ]);
+
+  useEffect(() => {
+    const uploaded = getHasUploaded();
+    if (uploaded) {
+      setHasUploadedState(true);
+      setMessages((prev) =>
+        prev[0]?.id === "assistant-welcome"
+          ? [
+              {
+                ...prev[0],
+                text: "File uploaded! Ask me anything about your PDF.",
+              },
+              ...prev.slice(1),
+            ]
+          : prev
+      );
+    }
+  }, []);
   const [input, setInput] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
-  const canSend = useMemo(
-    () => !loading && (input.trim().length > 0 || !!file),
-    [input, file, loading],
-  );
+  const canSend = useMemo(() => {
+    if (loading) return false;
+    if (!hasUploaded) {
+      // Before any upload: user MUST attach a file (text optional)
+      return !!file;
+    }
+    // After upload: text-only messages allowed, file input is disabled/hidden
+    return input.trim().length > 0;
+  }, [input, file, loading, hasUploaded]);
 
   function getOrCreateSessionId(): string {
     if (typeof window === "undefined") return "";
 
     const key = "n8n-chat-session-id";
-    const existing = window.localStorage.getItem(key);
+    const existing = window.sessionStorage.getItem(key);
     if (existing) return existing;
 
     const created = genId();
-    window.localStorage.setItem(key, created);
+    window.sessionStorage.setItem(key, created);
     return created;
   }
 
@@ -89,7 +123,7 @@ export default function Chat() {
     try {
       const formData = new FormData();
       formData.append("sessionId", getOrCreateSessionId());
-      formData.append("chatInput", userText || "Please process uploaded file");
+      formData.append("chatInput", userText);
       if (file) formData.append("data", file);
 
       const res = await fetch(endpoint, {
@@ -116,6 +150,11 @@ export default function Chat() {
           text: reply,
         },
       ]);
+
+      if (file) {
+        setHasUploadedState(true);
+        setHasUploaded(true);
+      }
 
       setInput("");
       setFile(null);
@@ -174,27 +213,41 @@ export default function Chat() {
         />
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <label className="text-sm">
-            <span className="mb-1 block text-zinc-600 dark:text-zinc-300">Upload PDF</span>
-            <input
-              type="file"
-              accept="application/pdf"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-              disabled={loading}
-              className="block text-sm"
-            />
-          </label>
+          {!hasUploaded ? (
+            <label className="text-sm">
+              <span className="mb-1 block text-zinc-600 dark:text-zinc-300">
+                Upload PDF (required)
+              </span>
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => {
+                  if (hasUploaded) {
+                    setFile(null);
+                    return;
+                  }
+                  setFile(e.target.files?.[0] ?? null);
+                }}
+                disabled={loading}
+                className="block text-sm"
+              />
+            </label>
+          ) : (
+            <p className="text-sm text-emerald-600 dark:text-emerald-400">
+              PDF uploaded. You can now ask questions.
+            </p>
+          )}
 
           <button
             type="submit"
             disabled={!canSend}
             className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? "Sending..." : "Send"}
+            {loading ? "Sending..." : hasUploaded ? "Ask" : "Upload & Send"}
           </button>
         </div>
 
-        {file && (
+        {file && !hasUploaded && (
           <p className="text-xs text-zinc-600 dark:text-zinc-300">
             Selected: <span className="font-medium">{file.name}</span>
           </p>
