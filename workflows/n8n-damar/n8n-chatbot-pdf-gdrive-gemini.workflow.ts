@@ -267,7 +267,8 @@ HISTORY PERCAKAPAN:
     })
     SupabaseVectorStore1 = {
         mode: 'retrieve-as-tool',
-        toolDescription: 'work',
+        toolDescription:
+            'Gunakan tool ini untuk mencari dan mengambil informasi relevan dari dokumen PDF yang sudah diupload user. Panggil tool ini setiap kali user bertanya tentang isi dokumen.',
         tableName: {
             __rl: true,
             value: 'documents',
