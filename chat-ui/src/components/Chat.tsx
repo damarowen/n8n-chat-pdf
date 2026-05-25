@@ -1,186 +1,165 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import {
+  type ChatMessage,
+  clearMessages,
+  genId,
+  getHasUploaded,
+  getOrCreateSessionId,
+  loadMessages,
+  saveMessages,
+  sendChatMessage,
+  setHasUploaded,
+} from "../services/chatService";
 
-type ChatRole = "user" | "assistant" | "system";
+/** Welcome message default — selalu sama di server & client agar tidak hydration mismatch */
+const defaultMessages: ChatMessage[] = [
+  {
+    id: "assistant-welcome",
+    role: "assistant",
+    text: "Hi! Please upload a PDF first so I can answer your questions.",
+  },
+];
 
-type ChatMessage = {
-  id: string;
-  role: ChatRole;
-  text: string;
+/** State gabungan chat — agar restore dari sessionStorage hanya butuh 1 setState */
+type ChatState = {
+  hasUploaded: boolean;
+  messages: ChatMessage[];
 };
 
-const endpoint =
-  process.env.NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL ??
-  "https://nein.damarowen.blog/webhook/chat-upload";
-
-const genId = () =>
-  typeof crypto !== "undefined" && "randomUUID" in crypto
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random()}`;
-
-function extractReplyText(payload: unknown): string {
-  if (typeof payload === "string") return payload;
-
-  if (Array.isArray(payload)) {
-    const first = payload[0] as Record<string, unknown> | undefined;
-    if (first && typeof first.output === "string") return first.output;
-    if (first && typeof first.text === "string") return first.text;
-  }
-
-  if (payload && typeof payload === "object") {
-    const obj = payload as Record<string, unknown>;
-    if (typeof obj.output === "string") return obj.output;
-    if (typeof obj.text === "string") return obj.text;
-    if (typeof obj.message === "string") return obj.message;
-    if (typeof obj.response === "string") return obj.response;
-  }
-
-  return "No response text returned from webhook.";
-}
-
-function getHasUploaded(): boolean {
-  if (typeof window === "undefined") return false;
-  return window.sessionStorage.getItem("n8n-chat-has-uploaded") === "true";
-}
-
-function setHasUploaded(value: boolean) {
-  if (typeof window === "undefined") return;
-  window.sessionStorage.setItem("n8n-chat-has-uploaded", value ? "true" : "false");
-}
+const initialState: ChatState = {
+  hasUploaded: false,
+  messages: defaultMessages,
+};
 
 export default function Chat() {
-  const [hasUploaded, setHasUploadedState] = useState<boolean>(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "assistant-welcome",
-      role: "assistant",
-      text: "Hi! Please upload a PDF first so I can answer your questions.",
-    },
-  ]);
+  /** State gabungan: upload status + pesan chat */
+  const [chatState, setChatState] = useState<ChatState>(initialState);
 
+  /** State: teks yang diketik user */
+  const [input, setInput] = useState("");
+
+  /** State: file PDF yang dipilih */
+  const [file, setFile] = useState<File | null>(null);
+
+  /** State: apakah request sedang berjalan */
+  const [loading, setLoading] = useState(false);
+
+  /** Restore status upload & riwayat pesan dari sessionStorage setelah mount di client */
   useEffect(() => {
     const uploaded = getHasUploaded();
-    if (uploaded) {
-      setHasUploadedState(true);
-      setMessages((prev) =>
-        prev[0]?.id === "assistant-welcome"
-          ? [
-              {
-                ...prev[0],
-                text: "File uploaded! Ask me anything about your PDF.",
-              },
-              ...prev.slice(1),
-            ]
-          : prev
-      );
-    }
+    const stored = loadMessages();
+    const restoredMessages = stored ?? (uploaded
+      ? [{ id: "assistant-welcome", role: "assistant" as const, text: "File uploaded! Ask me anything about your PDF." }]
+      : defaultMessages);
+    // eslint-disable-next-line
+    setChatState({ hasUploaded: uploaded, messages: restoredMessages });
   }, []);
-  const [input, setInput] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-  const [loading, setLoading] = useState(false);
-  const canSend = useMemo(() => {
-    if (loading) return false;
-    if (!hasUploaded) {
-      // Before any upload: user MUST attach a file (text optional)
-      return !!file;
-    }
-    // After upload: text-only messages allowed, file input is disabled/hidden
-    return input.trim().length > 0;
-  }, [input, file, loading, hasUploaded]);
 
-  function getOrCreateSessionId(): string {
-    if (typeof window === "undefined") return "";
-
-    const key = "n8n-chat-session-id";
-    const existing = window.sessionStorage.getItem(key);
-    if (existing) return existing;
-
-    const created = genId();
-    window.sessionStorage.setItem(key, created);
-    return created;
+  /** Helper: update pesan saja */
+  function setMessages(updater: (prev: ChatMessage[]) => ChatMessage[]) {
+    setChatState((prev) => ({ ...prev, messages: updater(prev.messages) }));
   }
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  /** Helper: update status upload saja */
+  function setHasUploadedState(value: boolean) {
+    setChatState((prev) => ({ ...prev, hasUploaded: value }));
+  }
+
+  const { hasUploaded, messages } = chatState;
+
+  /** Validasi tombol send — wajib ada text, sebelum upload wajib ada file juga */
+  const canSend = useMemo(() => {
+    if (loading) return false;
+    const hasText = input.trim().length > 0;
+    return hasUploaded ? hasText : hasText && !!file;
+  }, [input, file, loading, hasUploaded]);
+
+  /** Kirim pesan ke webhook n8n */
+  async function handleSend() {
     if (!canSend) return;
 
     const userText = input.trim();
 
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: genId(),
-        role: "user",
-        text:
-          userText ||
-          (file ? `Uploaded file: ${file.name}` : "(empty message)"),
-      },
-    ]);
+    /** Tambahkan pesan user ke daftar & simpan ke sessionStorage */
+    const userMsg: ChatMessage = {
+      id: genId(),
+      role: "user",
+      text: userText || (file ? `Uploaded file: ${file.name}` : "(empty message)"),
+    };
+    setMessages((prev) => {
+      const next = [...prev, userMsg];
+      saveMessages(next);
+      return next;
+    });
+
+    /** Reset input segera agar kolom chat langsung kosong */
+    setInput("");
+    setFile(null);
 
     setLoading(true);
 
     try {
-      const formData = new FormData();
-      formData.append("sessionId", getOrCreateSessionId());
-      formData.append("chatInput", userText);
-      if (file) formData.append("data", file);
+      const sessionId = getOrCreateSessionId();
+      const reply = await sendChatMessage(sessionId, userText, file);
 
-      const res = await fetch(endpoint, {
-        method: "POST",
-        body: formData,
+      /** Tambahkan balasan assistant ke daftar & simpan ke sessionStorage */
+      const assistantMsg: ChatMessage = { id: genId(), role: "assistant", text: reply };
+      setMessages((prev) => {
+        const next = [...prev, assistantMsg];
+        saveMessages(next);
+        return next;
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-      }
-
-      const contentType = res.headers.get("content-type") || "";
-      const payload = contentType.includes("application/json")
-        ? await res.json()
-        : await res.text();
-
-      const reply = extractReplyText(payload);
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: genId(),
-          role: "assistant",
-          text: reply,
-        },
-      ]);
-
+      /** Jika ada file yang dikirim, tandai sebagai sudah upload */
       if (file) {
         setHasUploadedState(true);
         setHasUploaded(true);
       }
-
-      setInput("");
-      setFile(null);
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unknown request error";
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: genId(),
-          role: "system",
-          text: `Request failed: ${message}`,
-        },
-      ]);
+      /** Tampilkan pesan error jika request gagal & simpan ke sessionStorage */
+      const message = error instanceof Error ? error.message : "Unknown request error";
+      const errorMsg: ChatMessage = { id: genId(), role: "system", text: `Request failed: ${message}` };
+      setMessages((prev) => {
+        const next = [...prev, errorMsg];
+        saveMessages(next);
+        return next;
+      });
     } finally {
       setLoading(false);
     }
   }
 
+  /** Handle form submit — kirim pesan ke webhook n8n */
+  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    await handleSend();
+  }
+
+  /** Render UI chat — header, daftar pesan, form input */
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-4 py-6 sm:px-6">
-      <header className="mb-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <h1 className="text-xl font-semibold">n8n Chat + PDF Upload</h1>
-        <p className="text-sm text-zinc-600 dark:text-zinc-300">
-          Session: <span className="font-mono">browser-managed</span>
-        </p>
+      <header className="mb-4 flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <div>
+          <h1 className="text-xl font-semibold">n8n Chat + PDF Upload</h1>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            Session: <span className="font-mono">browser-managed</span>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            clearMessages();
+            setChatState(initialState);
+            setHasUploaded(false);
+            setInput("");
+            setFile(null);
+          }}
+          className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+        >
+          Clear Chat
+        </button>
       </header>
 
       <section className="mb-4 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -207,6 +186,12 @@ export default function Chat() {
         <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              handleSend();
+            }
+          }}
           placeholder="Type your message..."
           className="min-h-24 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm outline-none ring-blue-500 focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
           disabled={loading}
