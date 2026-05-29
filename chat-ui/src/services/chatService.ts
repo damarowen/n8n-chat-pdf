@@ -127,32 +127,136 @@ export function getOrCreateSessionId(): string {
   return created;
 }
 
-/** Kirim pesan + file ke webhook n8n, kembalikan balasan lengkap dengan citations. */
+/**
+ * Jenis error yang bisa terjadi saat memanggil webhook chat.
+ * Dipakai UI untuk menampilkan pesan + saran yang sesuai konteks.
+ */
+export type ChatErrorKind = "timeout" | "network" | "http" | "unknown";
+
+/**
+ * Error khusus untuk request chat — membawa `kind` agar UI bisa membedakan
+ * timeout, masalah jaringan/CORS, HTTP error (4xx/5xx), atau error lain.
+ */
+export class ChatRequestError extends Error {
+  readonly kind: ChatErrorKind;
+  readonly status?: number;
+  constructor(kind: ChatErrorKind, message: string, status?: number) {
+    super(message);
+    this.name = "ChatRequestError";
+    this.kind = kind;
+    this.status = status;
+  }
+}
+
+/**
+ * Timeout default untuk request chat (ms). Sengaja lebih besar dari batas
+ * Cloudflare free plan (~100s) supaya kalau Cloudflare cut, browser tetap
+ * dapat error yang jelas dari sini. Pertama kali upload PDF biasanya butuh
+ * 30–90 detik karena n8n harus embed banyak chunk.
+ */
+export const DEFAULT_TIMEOUT_MS = 120_000;
+
+/**
+ * Pesan user-friendly per jenis error — dipakai UI tanpa harus mapping ulang.
+ */
+export function describeError(err: ChatRequestError): string {
+  switch (err.kind) {
+    case "timeout":
+      return "Server butuh waktu terlalu lama untuk merespons (>2 menit). Coba kirim lagi atau pakai file PDF yang lebih kecil.";
+    case "network":
+      return "Tidak bisa terhubung ke server. Periksa koneksi internet kamu, lalu coba lagi.";
+    case "http":
+      return `Server mengembalikan error${err.status ? ` (HTTP ${err.status})` : ""}. Coba lagi sebentar.`;
+    default:
+      return err.message || "Terjadi kesalahan tak terduga. Coba lagi.";
+  }
+}
+
+/**
+ * Kirim pesan + file ke webhook n8n, kembalikan balasan lengkap dengan citations.
+ *
+ * Pakai `AbortController` untuk timeout client-side. Kalau gagal, lempar
+ * `ChatRequestError` dengan `kind` yang sudah diklasifikasi sehingga UI bisa
+ * menampilkan pesan & tombol retry yang sesuai.
+ */
 export async function sendChatMessage(
   sessionId: string,
   chatInput: string,
-  file: File | null
+  file: File | null,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {}
 ): Promise<ChatReply> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
   const formData = new FormData();
   formData.append("sessionId", sessionId);
   formData.append("chatInput", chatInput);
   if (file) formData.append("data", file);
 
-  const res = await fetch(endpoint, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+  /**
+   * Gabungkan timeout internal dengan signal eksternal (kalau ada).
+   * Catatan: AbortSignal.any tersedia di browser modern; fallback manual
+   * di-handle dengan menambahkan listener.
+   */
+  const timeoutCtrl = new AbortController();
+  const timeoutId = setTimeout(() => timeoutCtrl.abort(), timeoutMs);
+  const onExternalAbort = () => timeoutCtrl.abort();
+  if (options.signal) {
+    if (options.signal.aborted) timeoutCtrl.abort();
+    else options.signal.addEventListener("abort", onExternalAbort);
   }
 
-  const contentType = res.headers.get("content-type") || "";
-  const payload = contentType.includes("application/json")
-    ? await res.json()
-    : await res.text();
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+      signal: timeoutCtrl.signal,
+    });
 
-  return extractReply(payload);
+    if (!res.ok) {
+      throw new ChatRequestError(
+        "http",
+        `HTTP ${res.status}: ${res.statusText}`,
+        res.status
+      );
+    }
+
+    const contentType = res.headers.get("content-type") || "";
+    const payload = contentType.includes("application/json")
+      ? await res.json()
+      : await res.text();
+
+    return extractReply(payload);
+  } catch (err) {
+    /** Sudah ChatRequestError → re-throw apa adanya. */
+    if (err instanceof ChatRequestError) throw err;
+
+    /** Timeout (dari AbortController internal) atau abort dari caller. */
+    if (err instanceof DOMException && err.name === "AbortError") {
+      const isCallerAbort = options.signal?.aborted;
+      throw new ChatRequestError(
+        "timeout",
+        isCallerAbort ? "Request dibatalkan." : `Request melebihi ${Math.round(timeoutMs / 1000)} detik.`
+      );
+    }
+
+    /**
+     * `TypeError: Failed to fetch` — browser tidak bisa establish koneksi.
+     * Penyebab umum: jaringan putus, DNS gagal, CORS preflight gagal, atau
+     * server menutup koneksi (mis. Cloudflare 524 setelah 100s).
+     */
+    if (err instanceof TypeError) {
+      throw new ChatRequestError(
+        "network",
+        "Gagal terhubung ke server (mungkin masalah jaringan, CORS, atau koneksi diputus oleh proxy)."
+      );
+    }
+
+    const message = err instanceof Error ? err.message : "Unknown error";
+    throw new ChatRequestError("unknown", message);
+  } finally {
+    clearTimeout(timeoutId);
+    if (options.signal) options.signal.removeEventListener("abort", onExternalAbort);
+  }
 }
 
 /** Simpan riwayat pesan ke sessionStorage (hilang saat tab ditutup) */

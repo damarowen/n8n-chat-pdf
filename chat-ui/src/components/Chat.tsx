@@ -6,7 +6,9 @@ import remarkGfm from "remark-gfm";
 import {
   type ChatMessage,
   type Citation,
+  ChatRequestError,
   clearMessages,
+  describeError,
   genId,
   getHasUploaded,
   getOrCreateSessionId,
@@ -15,6 +17,19 @@ import {
   sendChatMessage,
   setHasUploaded,
 } from "../services/chatService";
+
+/**
+ * Snapshot request terakhir yang gagal — disimpan agar tombol "Try again"
+ * di pesan error bisa mengulang request yang sama persis.
+ */
+type FailedRequest = {
+  /** ID pesan error di list, untuk auto-remove saat retry sukses. */
+  errorMsgId: string;
+  /** Text input user yang gagal terkirim. */
+  text: string;
+  /** File PDF yang dibarengi text (null kalau hanya chat). */
+  file: File | null;
+};
 
 /** Render konten assistant sebagai Markdown rapi (heading, list, tabel, kode). */
 function AssistantMarkdown({ text }: { text: string }) {
@@ -54,23 +69,39 @@ const STAGE_LABELS: Record<Exclude<LoadingStage, null>, string> = {
 };
 
 /**
+ * Hint tambahan saat indexing — upload pertama bisa lama (30-90s) karena
+ * embedding seluruh PDF. Tampil di bawah label utama.
+ */
+const STAGE_HINTS: Partial<Record<Exclude<LoadingStage, null>, string>> = {
+  indexing: "Upload pertama bisa memakan waktu hingga 2 menit.",
+};
+
+/**
  * Bubble assistant "thinking" — 3 titik bounce + label tahap.
  * Tampil di akhir list saat request sedang berjalan.
  */
 function ThinkingBubble({ stage }: { stage: Exclude<LoadingStage, null> }) {
+  const hint = STAGE_HINTS[stage];
   return (
     <div className="flex flex-col gap-1">
       <div
-        className="mr-auto flex max-w-[90%] items-center gap-2.5 rounded-xl bg-zinc-100 px-3 py-2.5 text-sm text-zinc-700 shadow-sm dark:bg-zinc-800 dark:text-zinc-200"
+        className="mr-auto flex max-w-[90%] flex-col gap-1 rounded-xl bg-zinc-100 px-3 py-2.5 text-sm text-zinc-700 shadow-sm dark:bg-zinc-800 dark:text-zinc-200"
         role="status"
         aria-live="polite"
       >
-        <span className="flex items-center gap-1" aria-hidden="true">
-          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s] dark:bg-zinc-400" />
-          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.15s] dark:bg-zinc-400" />
-          <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 dark:bg-zinc-400" />
-        </span>
-        <span className="font-medium tracking-tight">{STAGE_LABELS[stage]}</span>
+        <div className="flex items-center gap-2.5">
+          <span className="flex items-center gap-1" aria-hidden="true">
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.3s] dark:bg-zinc-400" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 [animation-delay:-0.15s] dark:bg-zinc-400" />
+            <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-zinc-500 dark:bg-zinc-400" />
+          </span>
+          <span className="font-medium tracking-tight">{STAGE_LABELS[stage]}</span>
+        </div>
+        {hint && (
+          <p className="pl-[26px] text-xs text-zinc-500 dark:text-zinc-400">
+            {hint}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -190,6 +221,13 @@ export default function Chat() {
    */
   const [isHydrating, setIsHydrating] = useState(true);
 
+  /**
+   * Snapshot request terakhir yang gagal. Saat ada nilai, pesan error
+   * yang ber-ID `lastFailed.errorMsgId` menampilkan tombol "Try again".
+   * Di-clear setelah retry sukses atau user mengirim pesan baru.
+   */
+  const [lastFailed, setLastFailed] = useState<FailedRequest | null>(null);
+
   /** Ref ke bottom marker di list pesan — dipakai untuk auto-scroll ke bawah. */
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -233,29 +271,39 @@ export default function Chat() {
     return hasUploaded ? hasText : hasText && !!file;
   }, [input, file, loading, hasUploaded]);
 
-  /** Kirim pesan ke webhook n8n */
-  async function handleSend() {
-    if (!canSend) return;
-
-    const userText = input.trim();
-
-    /** Tambahkan pesan user ke daftar & simpan ke sessionStorage */
-    const userMsg: ChatMessage = {
-      id: genId(),
-      role: "user",
-      text: userText || (file ? `Uploaded file: ${file.name}` : "(empty message)"),
-    };
-    setMessages((prev) => {
-      const next = [...prev, userMsg];
-      saveMessages(next);
-      return next;
-    });
-
-    /** Reset input segera agar kolom chat langsung kosong */
-    setInput("");
-    /** Simpan referensi file lokal supaya stage upload tetap tepat walau setFile() di-reset */
-    const fileToSend = file;
-    setFile(null);
+  /**
+   * Core sender — dipakai oleh `handleSend` (input baru) dan `handleRetry`
+   * (kirim ulang request yang gagal). Tidak baca state input; semua data
+   * datang dari argument supaya bisa dipanggil ulang setelah error.
+   *
+   * @param userText  Text yang akan dikirim ke webhook.
+   * @param fileToSend  File PDF yang menyertai (atau `null`).
+   * @param skipUserMessage  Saat retry, pesan user sudah ada di list dari
+   *                         pengiriman pertama → jangan tambahkan lagi
+   *                         supaya tidak duplicate.
+   * @param retryOfErrorId  Saat retry, ID pesan error yang akan dihapus
+   *                        kalau request kali ini sukses (atau diganti
+   *                        kalau gagal lagi).
+   */
+  async function performSend(
+    userText: string,
+    fileToSend: File | null,
+    skipUserMessage = false,
+    retryOfErrorId?: string
+  ) {
+    /** Tambahkan pesan user baru kalau bukan retry. */
+    if (!skipUserMessage) {
+      const userMsg: ChatMessage = {
+        id: genId(),
+        role: "user",
+        text: userText || (fileToSend ? `Uploaded file: ${fileToSend.name}` : "(empty message)"),
+      };
+      setMessages((prev) => {
+        const next = [...prev, userMsg];
+        saveMessages(next);
+        return next;
+      });
+    }
 
     /**
      * Tahap awal: kalau ada file → "Uploading PDF…", lalu setelah ~700ms
@@ -282,7 +330,11 @@ export default function Chat() {
         citations: reply.citations,
       };
       setMessages((prev) => {
-        const next = [...prev, assistantMsg];
+        /** Saat retry sukses, hapus pesan error lama supaya bersih. */
+        const cleaned = retryOfErrorId
+          ? prev.filter((m) => m.id !== retryOfErrorId)
+          : prev;
+        const next = [...cleaned, assistantMsg];
         saveMessages(next);
         return next;
       });
@@ -292,21 +344,70 @@ export default function Chat() {
         setHasUploadedState(true);
         setHasUploaded(true);
       }
+      /** Sukses → clear snapshot retry. */
+      setLastFailed(null);
     } catch (error) {
-      /** Tampilkan pesan error jika request gagal & simpan ke sessionStorage */
-      const message = error instanceof Error ? error.message : "Unknown request error";
-      const errorMsg: ChatMessage = { id: genId(), role: "system", text: `Request failed: ${message}` };
+      /**
+       * Klasifikasi error & tampilkan pesan ramah. Simpan snapshot agar
+       * tombol "Try again" bisa kirim ulang.
+       */
+      const friendly = error instanceof ChatRequestError
+        ? describeError(error)
+        : error instanceof Error
+          ? error.message
+          : "Unknown request error";
+      const errorMsgId = genId();
+      const errorMsg: ChatMessage = {
+        id: errorMsgId,
+        role: "system",
+        text: friendly,
+      };
       setMessages((prev) => {
-        const next = [...prev, errorMsg];
+        /** Saat retry gagal lagi, ganti pesan error lama dengan yang baru. */
+        const cleaned = retryOfErrorId
+          ? prev.filter((m) => m.id !== retryOfErrorId)
+          : prev;
+        const next = [...cleaned, errorMsg];
         saveMessages(next);
         return next;
       });
+      /**
+       * Simpan request gagal supaya bisa di-retry. Kalau retry, gunakan
+       * userMsgId yang sama (pesan user tidak digandakan).
+       */
+      setLastFailed({ errorMsgId, text: userText, file: fileToSend });
     } finally {
       /** Bersihkan timer + matikan bubble loading */
       if (indexingTimer) clearTimeout(indexingTimer);
       if (thinkingTimer) clearTimeout(thinkingTimer);
       setLoadingStage(null);
     }
+  }
+
+  /** Kirim pesan baru dari input box. */
+  async function handleSend() {
+    if (!canSend) return;
+    const userText = input.trim();
+    const fileToSend = file;
+    /** Reset input segera agar kolom chat langsung kosong */
+    setInput("");
+    setFile(null);
+    /** Kirim pesan baru → clear snapshot retry sebelumnya. */
+    setLastFailed(null);
+    await performSend(userText, fileToSend);
+  }
+
+  /** Kirim ulang request terakhir yang gagal. */
+  async function handleRetry() {
+    if (!lastFailed || loading) return;
+    const snapshot = lastFailed;
+    /** Hindari double-click — lock snapshot dan biarkan performSend handle UI. */
+    setLastFailed(null);
+    /**
+     * `skipUserMessage = true` karena pesan user dari pengiriman pertama
+     * sudah ada di list — kalau ditambahkan lagi akan jadi duplicate.
+     */
+    await performSend(snapshot.text, snapshot.file, true, snapshot.errorMsgId);
   }
 
   /** Handle form submit — kirim pesan ke webhook n8n */
@@ -349,28 +450,62 @@ export default function Chat() {
       </header>
 
       <section className="mb-4 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        {messages.map((msg) => (
-          <div key={msg.id} className="flex flex-col gap-1">
-            <div
-              className={`max-w-[90%] rounded-xl px-3 py-2 text-sm ${
-                msg.role === "user"
-                  ? "ml-auto whitespace-pre-wrap bg-blue-600 text-white"
-                  : msg.role === "assistant"
-                    ? "mr-auto bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
-                    : "mr-auto whitespace-pre-wrap bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200"
-              }`}
-            >
-              {msg.role === "assistant" ? (
-                <AssistantMarkdown text={msg.text} />
-              ) : (
-                msg.text
-              )}
+        {messages.map((msg) => {
+          /**
+           * Tampilkan tombol "Try again" hanya pada pesan error yang
+           * id-nya cocok dengan snapshot request terakhir & tidak sedang
+           * loading.
+           */
+          const isRetryable =
+            msg.role === "system" &&
+            lastFailed?.errorMsgId === msg.id &&
+            !loading;
+          return (
+            <div key={msg.id} className="flex flex-col gap-1">
+              <div
+                className={`max-w-[90%] rounded-xl px-3 py-2 text-sm ${
+                  msg.role === "user"
+                    ? "ml-auto whitespace-pre-wrap bg-blue-600 text-white"
+                    : msg.role === "assistant"
+                      ? "mr-auto bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
+                      : "mr-auto whitespace-pre-wrap bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200"
+                }`}
+              >
+                {msg.role === "assistant" ? (
+                  <AssistantMarkdown text={msg.text} />
+                ) : (
+                  msg.text
+                )}
+              </div>
+              {msg.role === "assistant" && msg.citations && msg.citations.length > 0 ? (
+                <CitationList citations={msg.citations} />
+              ) : null}
+              {isRetryable ? (
+                <button
+                  type="button"
+                  onClick={handleRetry}
+                  className="mr-auto inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-900/40"
+                  aria-label="Coba kirim ulang pesan terakhir"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 20 20"
+                    fill="currentColor"
+                    className="h-3.5 w-3.5"
+                    aria-hidden="true"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M15.312 11.424a5.5 5.5 0 01-9.201 2.466l-.312-.311h2.433a.75.75 0 000-1.5H3.989a.75.75 0 00-.75.75v4.242a.75.75 0 001.5 0v-2.43l.31.31a7 7 0 0011.712-3.138.75.75 0 00-1.449-.39zm1.23-3.723a.75.75 0 00.219-.53V2.929a.75.75 0 00-1.5 0V5.36l-.31-.31A7 7 0 003.239 8.188a.75.75 0 101.448.389A5.5 5.5 0 0113.89 6.11l.311.31h-2.432a.75.75 0 000 1.5h4.243a.75.75 0 00.53-.219z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Coba lagi
+                </button>
+              ) : null}
             </div>
-            {msg.role === "assistant" && msg.citations && msg.citations.length > 0 ? (
-              <CitationList citations={msg.citations} />
-            ) : null}
-          </div>
-        ))}
+          );
+        })}
 
         {/* Bubble "thinking" muncul di bawah daftar pesan saat request sedang jalan */}
         {loadingStage ? <ThinkingBubble stage={loadingStage} /> : null}
