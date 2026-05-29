@@ -1,0 +1,21 @@
+# =============================================================================
+# terraform.tfvars.example — Template
+# =============================================================================
+# Copy ke `terraform.tfvars` (di-gitignore) lalu isi nilai yang sesuai:
+#
+#   cp terraform.tfvars.example terraform.tfvars
+#
+# Kebanyakan field sudah punya default di variables.tf — yang WAJIB di-set
+# cuma `n8n_chat_webhook_url`. Override field lain hanya kalau perlu.
+# =============================================================================
+
+# Wajib — URL webhook n8n untuk chat-ui
+n8n_chat_webhook_url = "https://nein.damarowen.blog/webhook/chat-upload"
+
+# Opsional — override kalau berbeda dari default
+# project_name      = "n8n-chat-pdf"
+# github_owner      = "damarowen"
+# github_repo       = "n8n-chat-pdf"
+# production_branch = "main"
+# root_directory    = "chat-ui"
+# custom_domain     = "chat.damarowen.blog"
