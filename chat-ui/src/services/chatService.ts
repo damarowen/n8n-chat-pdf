@@ -149,12 +149,13 @@ export class ChatRequestError extends Error {
 }
 
 /**
- * Timeout default untuk request chat (ms). Sengaja lebih besar dari batas
- * Cloudflare free plan (~100s) supaya kalau Cloudflare cut, browser tetap
- * dapat error yang jelas dari sini. Pertama kali upload PDF biasanya butuh
- * 30–90 detik karena n8n harus embed banyak chunk.
+ * Timeout default untuk request chat (ms). Sengaja besar (5 menit) untuk
+ * mengakomodasi upload PDF besar + embedding banyak chunk yang bisa lambat
+ * pada request pertama. Kalau Cloudflare/proxy memotong duluan, error akan
+ * muncul sebagai `network` (TypeError) — bukan `timeout` — tapi UI tetap
+ * memberi tombol "Coba lagi".
  */
-export const DEFAULT_TIMEOUT_MS = 120_000;
+export const DEFAULT_TIMEOUT_MS = 300_000;
 
 /**
  * Pesan user-friendly per jenis error — dipakai UI tanpa harus mapping ulang.
@@ -162,7 +163,7 @@ export const DEFAULT_TIMEOUT_MS = 120_000;
 export function describeError(err: ChatRequestError): string {
   switch (err.kind) {
     case "timeout":
-      return "Server butuh waktu terlalu lama untuk merespons (>2 menit). Coba kirim lagi atau pakai file PDF yang lebih kecil.";
+      return "Server butuh waktu terlalu lama untuk merespons (>5 menit). Coba kirim lagi atau pakai file PDF yang lebih kecil.";
     case "network":
       return "Tidak bisa terhubung ke server. Periksa koneksi internet kamu, lalu coba lagi.";
     case "http":

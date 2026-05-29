@@ -69,11 +69,11 @@ const STAGE_LABELS: Record<Exclude<LoadingStage, null>, string> = {
 };
 
 /**
- * Hint tambahan saat indexing — upload pertama bisa lama (30-90s) karena
- * embedding seluruh PDF. Tampil di bawah label utama.
+ * Hint tambahan saat indexing — upload pertama bisa lama (30s–beberapa
+ * menit) karena embedding seluruh PDF. Tampil di bawah label utama.
  */
 const STAGE_HINTS: Partial<Record<Exclude<LoadingStage, null>, string>> = {
-  indexing: "Upload pertama bisa memakan waktu hingga 2 menit.",
+  indexing: "Upload pertama bisa memakan waktu hingga 5 menit. Mohon jangan tutup tab.",
 };
 
 /**
