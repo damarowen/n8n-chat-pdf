@@ -21,8 +21,14 @@ A monorepo managing AI-powered automation workflows using **n8n-as-code** alongs
    - [n8nac Commands](#n8nac-commands)
    - [Local Frontend Development](#local-frontend-development)
 6. [Deployment](#deployment)
-7. [Environment Configuration](#environment-configuration)
-8. [AI Agent Guidelines](#ai-agent-guidelines)
+7. [Infrastructure as Code (Terraform)](#infrastructure-as-code-terraform)
+   - [What it Provisions](#what-it-provisions)
+   - [File Structure & Responsibilities](#file-structure--responsibilities)
+   - [First-Time Setup](#first-time-setup)
+   - [Common Tasks](#common-tasks)
+   - [Changing the Custom Domain](#changing-the-custom-domain)
+8. [Environment Configuration](#environment-configuration)
+9. [AI Agent Guidelines](#ai-agent-guidelines)
 
 ---
 
@@ -74,6 +80,15 @@ n8n-workflows/
 ├── docs/
 │   ├── react-migration-plan.md          # Migration design document
 │   └── README.md                        # This file
+├── infra/                               # Terraform IaC for Vercel deployment
+│   ├── versions.tf                      # Terraform + provider version locks
+│   ├── providers.tf                     # Vercel provider config (token via env)
+│   ├── variables.tf                     # Input variables + defaults
+│   ├── main.tf                          # Project + env var + domain resources
+│   ├── outputs.tf                       # project_id, URLs, DNS instructions
+│   ├── terraform.tfvars.example         # Template (commit-safe)
+│   ├── terraform.tfvars                 # YOUR values (gitignored)
+│   └── README.md                        # Infra-specific setup guide
 ├── workflows/
 │   └── n8n-damar/
 │       ├── n8n-chatbot-pdf-gdrive-gemini.workflow.ts
@@ -334,7 +349,8 @@ The frontend automatically connects to the live n8n webhook URL defined in `.env
 | Component | Target | Notes |
 |-----------|--------|-------|
 | n8n Workflows | External n8n Instance | `https://nein.damarowen.blog` |
-| Next.js Frontend | Vercel / Netlify | `NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL` must be set |
+| Next.js Frontend | Vercel (via Terraform) | Provisioned by `infra/` — see [Infrastructure as Code](#infrastructure-as-code-terraform) |
+| Custom Domain | `chat.damarowen.blog` | Managed by `vercel_project_domain` in Terraform |
 
 ### Deployment Checklist
 
@@ -344,6 +360,162 @@ The frontend automatically connects to the live n8n webhook URL defined in `.env
 - [ ] Production test: chat text only
 - [ ] Production test: upload PDF only
 - [ ] Production test: ask question requiring retrieved context
+
+---
+
+## Infrastructure as Code (Terraform)
+
+The `infra/` folder contains **Terraform** code that provisions the entire Vercel
+deployment automatically. If you've never used Terraform before — think of it as
+"infrastructure version control": instead of clicking buttons in the Vercel
+dashboard, the desired state is described in `.tf` files and applied by a single
+command. Re-running the command is idempotent (no duplicate resources).
+
+> **TL;DR**: After cloning, set `VERCEL_API_TOKEN`, copy `terraform.tfvars.example`
+> to `terraform.tfvars`, then run `terraform init && terraform apply`. The Vercel
+> project + custom domain + env vars are created automatically. Future `git push`
+> to `main` triggers a production deploy via Vercel's native GitHub integration.
+
+### What it Provisions
+
+| Resource | Purpose |
+|----------|---------|
+| `vercel_project.chat_ui` | The Vercel project itself, linked to the GitHub repo `damarowen/n8n-chat-pdf`, with `chat-ui/` as the monorepo root directory and `framework = nextjs` |
+| `vercel_project_environment_variable.n8n_webhook` | Sets `NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL` across all three Vercel environments (production / preview / development) |
+| `vercel_project_domain.custom` | Attaches the custom domain (e.g. `chat.damarowen.blog`) to the project |
+
+After `apply`, Vercel auto-deploys whenever you `git push origin main` — no
+Terraform re-run is needed for code changes. Terraform is only re-run when you
+change **infrastructure** (env vars, domain, project settings).
+
+### File Structure & Responsibilities
+
+```
+infra/
+├── versions.tf              # Pins Terraform CLI >= 1.6.0 and provider versions
+├── providers.tf             # Configures the Vercel provider (reads token from env var)
+├── variables.tf             # Declares all input variables + their defaults
+├── main.tf                  # Defines the actual resources (project, env var, domain)
+├── outputs.tf               # Values printed after apply (project ID, URLs, DNS hints)
+├── terraform.tfvars.example # Template — copy to terraform.tfvars and customize
+├── terraform.tfvars         # YOUR local values (gitignored, never committed)
+├── terraform.tfstate        # State file (gitignored — tracks what Terraform created)
+├── .terraform.lock.hcl      # Provider version lockfile (COMMITTED for reproducibility)
+└── README.md                # Folder-level setup guide (same info, more detail)
+```
+
+| File | What it does | When you edit it |
+|------|--------------|------------------|
+| **`versions.tf`** | Locks Terraform version (`>= 1.6.0`) and Vercel provider version (`vercel/vercel ~> 2.0`). Acts as a compatibility guarantee. | Almost never — only when upgrading provider. |
+| **`providers.tf`** | Tells Terraform how to authenticate with Vercel. The token is read from the `VERCEL_API_TOKEN` environment variable, so it never appears in code or git. | If you add another provider (e.g. Cloudflare for DNS). |
+| **`variables.tf`** | Declares all configurable inputs (`project_name`, `github_owner`, `custom_domain`, `n8n_chat_webhook_url`, etc.) with defaults baked in for this project. Acts as the "API" of the infra. | When adding a new configurable knob. |
+| **`main.tf`** | The actual infrastructure declaration: 3 resources (project, env var, domain). This is where the meaningful logic lives. | When changing what gets provisioned (e.g. add a second env var, add a second domain). |
+| **`outputs.tf`** | Defines what Terraform prints after `apply` — useful info like `project_id`, default Vercel URL, custom domain URL, and DNS setup instructions. | When you want to expose more info to the operator. |
+| **`terraform.tfvars.example`** | A safe-to-commit template showing which values to provide. Copy it to `terraform.tfvars` to use it. | When adding a new variable that needs an example. |
+| **`terraform.tfvars`** | **Your private values** — e.g. the actual n8n webhook URL. Gitignored. Each developer creates their own. | When changing input values (e.g. switching webhook URL). |
+| **`terraform.tfstate`** | Terraform's record of what it actually created in Vercel (resource IDs, etc.). **Critical** — losing this means Terraform "forgets" what it manages. Gitignored because it may contain secrets. | Never edit by hand. Back it up somewhere safe. |
+| **`.terraform.lock.hcl`** | Locks exact provider versions for reproducibility across machines. | Committed; regenerated by `terraform init -upgrade`. |
+
+### First-Time Setup
+
+```bash
+# 1) Install Terraform (macOS via Homebrew)
+brew install terraform
+terraform -version   # should be >= 1.6.0
+
+# 2) Get a Vercel API token: https://vercel.com/account/tokens
+export VERCEL_API_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
+# (Add this line to ~/.zshrc to make it permanent)
+
+# 3) Configure your inputs
+cd infra
+cp terraform.tfvars.example terraform.tfvars
+# Open terraform.tfvars and set n8n_chat_webhook_url
+
+# 4) Initialize (downloads providers)
+terraform init
+
+# 5) Preview changes (always do this before apply)
+terraform plan
+
+# 6) Apply (creates the project on Vercel)
+terraform apply
+
+# 7) Set the DNS CNAME at your DNS provider:
+#      chat   CNAME   cname.vercel-dns.com
+#    (terraform output prints exact instructions)
+```
+
+### Common Tasks
+
+```bash
+cd infra
+
+# See current outputs (project ID, URLs, etc.)
+terraform output
+
+# Inspect what Terraform thinks currently exists
+terraform state list
+terraform state show vercel_project.chat_ui
+
+# Re-apply after changing a variable (e.g. new webhook URL in terraform.tfvars)
+terraform apply
+
+# Format / validate before committing
+terraform fmt
+terraform validate
+
+# DESTRUCTIVE — removes the Vercel project + domain attachment
+terraform destroy
+```
+
+### Changing the Custom Domain
+
+Example: switching from `chat.damarowen.blog` → `pdfaq.damarowen.blog`.
+
+> Vercel does **not** allow editing a `vercel_project_domain` resource's `domain`
+> field in place — Terraform must detach the old domain and attach the new one.
+> The plan will show "1 to add, 1 to destroy". This is expected and safe.
+
+**Step 1 — Update the variable** in `infra/terraform.tfvars`:
+```hcl
+custom_domain = "pdfaq.damarowen.blog"
+```
+(Or override on the CLI: `terraform apply -var="custom_domain=pdfaq.damarowen.blog"`)
+
+**Step 2 — Add a DNS CNAME for the new subdomain** at your DNS provider
+(before applying, so propagation has time to start):
+```
+pdfaq   CNAME   cname.vercel-dns.com
+```
+
+**Step 3 — Apply the change**:
+```bash
+cd infra
+terraform plan    # confirms: + add pdfaq, - remove chat
+terraform apply
+```
+
+**Step 4 — Verify**:
+```bash
+dig +short pdfaq.damarowen.blog
+curl -sI https://pdfaq.damarowen.blog | head -3
+terraform output custom_domain_url
+```
+
+**Step 5 — Clean up DNS** (after verifying the new domain works):
+- Remove the old `chat` CNAME record at the DNS provider.
+
+**Need both domains simultaneously (for migration)?**
+Add a second resource block in `main.tf` instead of changing the variable:
+```hcl
+resource "vercel_project_domain" "custom_alias" {
+  project_id = vercel_project.chat_ui.id
+  domain     = "pdfaq.damarowen.blog"
+}
+```
+Both `chat` and `pdfaq` will serve the same Vercel project until you decide to
+remove one.
 
 ---
 
@@ -417,4 +589,4 @@ When working on this repo, AI agents should:
 
 ---
 
-*Last updated: 2026-05-24*
+*Last updated: 2026-05-30*
