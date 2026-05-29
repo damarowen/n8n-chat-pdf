@@ -1,11 +1,29 @@
 /** Role pesan dalam chat */
 export type ChatRole = "user" | "assistant" | "system";
 
+/** Satu sitasi yang dirujuk AI Agent (dari blok `---CITATIONS---` di workflow). */
+export type Citation = {
+  /** Rentang baris pada dokumen sumber. */
+  lines: { from: number; to: number };
+  /** Kutipan kunci satu kalimat dari chunk. */
+  excerpt: string;
+};
+
 /** Struktur satu pesan chat */
 export type ChatMessage = {
   id: string;
   role: ChatRole;
   text: string;
+  /** Daftar sitasi yang menyertai jawaban AI (kosong untuk pesan user/system). */
+  citations?: Citation[];
+};
+
+/** Bentuk balasan dari webhook n8n setelah parsing FormatCitation node. */
+export type ChatReply = {
+  output: string;
+  citations: Citation[];
+  citationText: string;
+  hasCitations: boolean;
 };
 
 /** URL webhook n8n — dari env atau fallback */
@@ -20,25 +38,68 @@ export function genId(): string {
     : `${Date.now()}-${Math.random()}`;
 }
 
-/** Ambil teks jawaban dari berbagai format payload yang mungkin dikembalikan webhook */
-export function extractReplyText(payload: unknown): string {
-  if (typeof payload === "string") return payload;
+/** Ambil ChatReply (output + citations) dari berbagai format payload webhook. */
+export function extractReply(payload: unknown): ChatReply {
+  /** Default kosong — dipakai sebagai fallback bila tidak ada field yang cocok. */
+  const empty: ChatReply = {
+    output: "No response text returned from webhook.",
+    citations: [],
+    citationText: "",
+    hasCitations: false,
+  };
+
+  /** Normalisasi citations: terima array of Citation, abaikan kalau format aneh. */
+  const normalizeCitations = (raw: unknown): Citation[] => {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const obj = item as Record<string, unknown>;
+        const lines = obj.lines as Record<string, unknown> | undefined;
+        const from = typeof lines?.from === "number" ? lines.from : NaN;
+        const to = typeof lines?.to === "number" ? lines.to : NaN;
+        const excerpt = typeof obj.excerpt === "string" ? obj.excerpt : "";
+        if (Number.isNaN(from) || Number.isNaN(to)) return null;
+        return { lines: { from, to }, excerpt } as Citation;
+      })
+      .filter((c): c is Citation => c !== null);
+  };
+
+  /** Bentuk objek tunggal hasil parsing → ChatReply. */
+  const buildReply = (obj: Record<string, unknown>): ChatReply => {
+    const output =
+      typeof obj.output === "string"
+        ? obj.output
+        : typeof obj.text === "string"
+          ? obj.text
+          : typeof obj.message === "string"
+            ? obj.message
+            : typeof obj.response === "string"
+              ? obj.response
+              : empty.output;
+    const citations = normalizeCitations(obj.citations);
+    const citationText =
+      typeof obj.citationText === "string" ? obj.citationText : "";
+    const hasCitations =
+      typeof obj.hasCitations === "boolean"
+        ? obj.hasCitations
+        : citations.length > 0;
+    return { output, citations, citationText, hasCitations };
+  };
+
+  if (typeof payload === "string") return { ...empty, output: payload };
 
   if (Array.isArray(payload)) {
     const first = payload[0] as Record<string, unknown> | undefined;
-    if (first && typeof first.output === "string") return first.output;
-    if (first && typeof first.text === "string") return first.text;
+    if (first) return buildReply(first);
+    return empty;
   }
 
   if (payload && typeof payload === "object") {
-    const obj = payload as Record<string, unknown>;
-    if (typeof obj.output === "string") return obj.output;
-    if (typeof obj.text === "string") return obj.text;
-    if (typeof obj.message === "string") return obj.message;
-    if (typeof obj.response === "string") return obj.response;
+    return buildReply(payload as Record<string, unknown>);
   }
 
-  return "No response text returned from webhook.";
+  return empty;
 }
 
 /** Cek apakah user sudah pernah upload PDF (dari sessionStorage) */
@@ -66,12 +127,12 @@ export function getOrCreateSessionId(): string {
   return created;
 }
 
-/** Kirim pesan + file ke webhook n8n, kembalikan teks jawaban */
+/** Kirim pesan + file ke webhook n8n, kembalikan balasan lengkap dengan citations. */
 export async function sendChatMessage(
   sessionId: string,
   chatInput: string,
   file: File | null
-): Promise<string> {
+): Promise<ChatReply> {
   const formData = new FormData();
   formData.append("sessionId", sessionId);
   formData.append("chatInput", chatInput);
@@ -91,7 +152,7 @@ export async function sendChatMessage(
     ? await res.json()
     : await res.text();
 
-  return extractReplyText(payload);
+  return extractReply(payload);
 }
 
 /** Simpan riwayat pesan ke sessionStorage (hilang saat tab ditutup) */

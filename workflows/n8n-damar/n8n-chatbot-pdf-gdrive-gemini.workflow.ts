@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : n8n-chatbot-pdf-gdrive-gemini
-// Nodes   : 20  |  Connections: 11
+// Nodes   : 21  |  Connections: 12
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -15,6 +15,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // RecursiveCharacterTextSplitter     textSplitterRecursiveCharacterTextSplitter [ai_textSplitter]
 // StickyNote                         stickyNote
 // AiAgent                            agent                      [AI] [onError→regular]
+// FormatCitation                     code
 // GoogleGeminiChatModel              lmChatGoogleGemini         [creds] [retry] [ai_languageModel]
 // PostgresChatMemory                 memoryPostgresChat         [creds] [ai_memory]
 // EmbeddingsGoogleGemini1            embeddingsGoogleGemini     [creds] [ai_embedding]
@@ -36,9 +37,10 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //        → UploadAcknowledgement
 //          → PrepareForAi
 //            → AiAgent
-//              → If_
-//                → EditFields
-//               .out(1) → ReturnResponse
+//              → FormatCitation
+//                → If_
+//                  → EditFields
+//                 .out(1) → ReturnResponse
 // ChatUploadWebhook
 //    → IfFileUploaded
 //      → SupabaseVectorStore (↩ loop)
@@ -60,6 +62,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
     name: 'n8n-chatbot-pdf-gdrive-gemini',
     active: true,
     isArchived: false,
+    projectId: 'Fxyw5Gdhf1kinTkH',
     settings: {
         executionOrder: 'v1',
         binaryMode: 'separate',
@@ -142,9 +145,16 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
     DefaultDataLoader = {
         dataType: 'binary',
         binaryMode: 'specificField',
-        loader: 'auto',
-        binaryDataKey: 'data',
-        options: {},
+        options: {
+            metadata: {
+                metadataValues: [
+                    {
+                        name: 'sessionId',
+                        value: "={{ $('Chat Upload Webhook').item.json.body.sessionId }}",
+                    },
+                ],
+            },
+        },
     };
 
     @node({
@@ -167,7 +177,6 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         position: [528, -80],
     })
     StickyNote = {
-        color: 1,
         content: `SUMMARY: JALUR INGESTION (LIBRARY BUILDER)
 
 Source: Google Drive (Folder: Buat Kerja)
@@ -196,23 +205,77 @@ Input: Application/PDF (Binary) -> Process: Parse  -> Split (1000 text) -> Vecto
         onError: 'continueRegularOutput',
     })
     AiAgent = {
-        text: '={{ $json.chatInput }}',
         options: {
-            systemMessage: `Anda adalah Asisten Virtual yang bertugas menjawab pertanyaan berdasarkan dokumen yang diberikan.
+            systemMessage: `Anda adalah Asisten Virtual yang menjawab pertanyaan berdasarkan dokumen PDF yang diupload user pada sesi ini.
 
-ATURAN UTAMA:
-1. GUNAKAN HANYA informasi yang ditemukan dalam dokumen (Context) yang diambil dari database.
-2. JANGAN gunakan pengetahuan umum Anda di luar dokumen tersebut.
-3. JIKA informasi tidak ada dalam dokumen, jawablah dengan jujur: "Maaf, saya tidak menemukan informasi tersebut dalam dokumen yang tersedia."
-4. JAWABLAH dengan bahasa yang sama dengan pertanyaan user (Indonesia/Inggris).
-5. TETAPLAH objektif, profesional, dan ringkas.
+ALUR WAJIB (TIDAK BOLEH DILEWATI):
+- LANGKAH 1: SETIAP kali user mengirim pertanyaan APAPUN tentang isi dokumen, Anda WAJIB memanggil tool "search_documents" terlebih dahulu untuk mengambil konteks dari database. JANGAN PERNAH menjawab tanpa memanggil tool ini terlebih dulu.
+- LANGKAH 2: Setelah tool mengembalikan hasil, baca konteks yang diambil dan susun jawaban hanya berdasarkan konteks tersebut.
+- LANGKAH 3: Sertakan sitasi sesuai format di bawah.
 
-DATA KONTEKS:
-{context}
+ATURAN JAWABAN:
+1. GUNAKAN HANYA informasi dari hasil tool. JANGAN gunakan pengetahuan umum di luar dokumen.
+2. Jika hasil tool kosong atau benar-benar tidak ada informasi yang relevan, baru jawab: "Maaf, saya tidak menemukan informasi tersebut dalam dokumen yang tersedia." dan blok sitasi diisi [].
+3. JAWAB dengan bahasa yang sama dengan pertanyaan user (Indonesia/Inggris).
+4. Tetap objektif, profesional, dan ringkas.
 
-HISTORY PERCAKAPAN:
-{chat_history}`,
+FORMAT JAWABAN (WAJIB Markdown rapi):
+- Mulai dengan 1 kalimat ringkasan ("**Ringkasan:** ...") yang menjawab inti pertanyaan.
+- Jika ada beberapa poin/data, gunakan **bullet list** ("- item").
+- Jika ada data tabular (mis. daftar invoice, harga, tanggal, jumlah), WAJIB gunakan **tabel Markdown** dengan header yang jelas. Contoh:
+
+  | No | Nomor Invoice | Total Pendapatan |
+  |----|---------------|------------------|
+  | 1  | INV-XXX       | Rp1.000.000      |
+
+- Gunakan **bold** untuk angka/nilai penting, dan heading "###" untuk seksi panjang.
+- Tutup dengan baris "**Total / Kesimpulan:** ..." jika relevan.
+- Jangan menulis jawaban dalam 1 paragraf panjang — pecah jadi seksi/list/tabel.
+
+SITASI (WAJIB di paling akhir, di luar konten Markdown):
+
+---CITATIONS---
+[{"lines":{"from":<loc.lines.from>,"to":<loc.lines.to>},"excerpt":"<kutipan 1 kalimat kunci dari dokumen>"}]
+---END_CITATIONS---
+
+Jika tidak ada dokumen relevan, isi dengan: []`,
         },
+    };
+
+    @node({
+        id: 'fc1a2b3c-4d5e-6f70-8901-abcdef123456',
+        name: 'Format Citation',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [336, -736],
+    })
+    FormatCitation = {
+        jsCode: `const raw = $input.first().json.output ?? '';
+const citationMatch = raw.match(/---CITATIONS---\\s*([\\s\\S]*?)\\s*---END_CITATIONS---/);
+let answerText = raw;
+let citations = [];
+if (citationMatch) {
+  answerText = raw.replace(/---CITATIONS---[\\s\\S]*?---END_CITATIONS---/, '').trim();
+  try { citations = JSON.parse(citationMatch[1].trim()); } catch (e) { citations = []; }
+}
+let citationText = '';
+if (citations.length > 0) {
+  citationText = citations.map(function (c, i) {
+    var lines = c.lines ? 'Brs. ' + c.lines.from + '\\u2013' + c.lines.to : '';
+    var excerpt = c.excerpt ? ' "' + c.excerpt + '"' : '';
+    return '[' + (i + 1) + '] ' + lines + ':' + excerpt;
+  }).join('\\n');
+}
+return [{
+  json: {
+    output: answerText,
+    citations: citations,
+    citationText: citationText,
+    hasCitations: citations.length > 0,
+    error: $input.first().json.error ?? null,
+    sessionId: $input.first().json.sessionId ?? ''
+  }
+}];`,
     };
 
     @node({
@@ -225,7 +288,6 @@ HISTORY PERCAKAPAN:
         retryOnFail: true,
     })
     GoogleGeminiChatModel = {
-        modelName: 'models/gemini-2.5-flash',
         options: {
             temperature: 0.1,
         },
@@ -240,9 +302,7 @@ HISTORY PERCAKAPAN:
         credentials: { postgres: { id: 'yoe8aj2syp3VHrNe', name: 'Postgres account' } },
     })
     PostgresChatMemory = {
-        sessionKey: '={{ $json.sessionId }}',
         tableName: 'chat_history',
-        contextWindowLength: 5,
     };
 
     @node({
@@ -268,14 +328,23 @@ HISTORY PERCAKAPAN:
     SupabaseVectorStore1 = {
         mode: 'retrieve-as-tool',
         toolDescription:
-            'Gunakan tool ini untuk mencari dan mengambil informasi relevan dari dokumen PDF yang sudah diupload user. Panggil tool ini setiap kali user bertanya tentang isi dokumen.',
+            'WAJIB dipanggil untuk SETIAP pertanyaan user. Tool ini melakukan semantic search ke dokumen PDF yang diupload user di sesi chat ini dan mengembalikan potongan teks (chunks) yang paling relevan beserta metadata (loc.lines.from, loc.lines.to). Input: query string berisi pertanyaan atau kata kunci dari user. Selalu panggil tool ini terlebih dahulu sebelum menyusun jawaban, walaupun pertanyaan user terlihat singkat atau ambigu.',
         tableName: {
             __rl: true,
             value: 'documents',
             mode: 'list',
             cachedResultName: 'documents',
         },
-        options: {},
+        options: {
+            metadata: {
+                metadataValues: [
+                    {
+                        name: 'sessionId',
+                        value: "={{$('Prepare For AI').item.json.sessionId}}",
+                    },
+                ],
+            },
+        },
     };
 
     @node({
@@ -286,12 +355,11 @@ HISTORY PERCAKAPAN:
         position: [-16, -688],
     })
     IfFileUploaded = {
-        looseTypeValidation: true,
         conditions: {
             options: {
                 caseSensitive: true,
                 leftValue: '',
-                typeValidation: 'strict',
+                typeValidation: 'loose',
                 version: 3,
             },
             conditions: [
@@ -308,6 +376,7 @@ HISTORY PERCAKAPAN:
             ],
             combinator: 'and',
         },
+        looseTypeValidation: true,
         options: {},
     };
 
@@ -320,8 +389,8 @@ HISTORY PERCAKAPAN:
         position: [-352, -688],
     })
     ChatUploadWebhook = {
-        path: 'chat-upload',
         httpMethod: 'POST',
+        path: 'chat-upload',
         responseMode: 'lastNode',
         options: {},
     };
@@ -352,11 +421,9 @@ HISTORY PERCAKAPAN:
         name: 'Prepare For AI',
         type: 'n8n-nodes-base.set',
         version: 3.4,
-        position: [400, -624],
+        position: [304, -752],
     })
     PrepareForAi = {
-        mode: 'manual',
-        include: 'none',
         assignments: {
             assignments: [
                 {
@@ -384,7 +451,6 @@ HISTORY PERCAKAPAN:
         position: [688, -448],
     })
     StickyNote1 = {
-        color: 1,
         content: `Trigger: ChatUploadWebhook (POST /webhook/chat-upload)
 
 Memory: Postgres Chat Memory di tabel chat_history (per sessionId).
@@ -461,9 +527,33 @@ Jika error: menampilkan pesan Maaf banget...`,
         position: [512, -640],
     })
     ReturnResponse = {
-        includeOtherFields: true,
         assignments: {
-            assignments: [],
+            assignments: [
+                {
+                    id: 'rr-001',
+                    name: 'output',
+                    value: '={{ $json.output }}',
+                    type: 'string',
+                },
+                {
+                    id: 'rr-002',
+                    name: 'citations',
+                    value: '={{ $json.citations }}',
+                    type: 'array',
+                },
+                {
+                    id: 'rr-003',
+                    name: 'citationText',
+                    value: '={{ $json.citationText }}',
+                    type: 'string',
+                },
+                {
+                    id: 'rr-004',
+                    name: 'hasCitations',
+                    value: '={{ $json.hasCitations }}',
+                    type: 'boolean',
+                },
+            ],
         },
         options: {},
     };
@@ -482,7 +572,8 @@ Jika error: menampilkan pesan Maaf banget...`,
         this.SupabaseVectorStore.out(0).to(this.UploadAcknowledgement.in(0));
         this.UploadAcknowledgement.out(0).to(this.PrepareForAi.in(0));
         this.PrepareForAi.out(0).to(this.AiAgent.in(0));
-        this.AiAgent.out(0).to(this.If_.in(0));
+        this.AiAgent.out(0).to(this.FormatCitation.in(0));
+        this.FormatCitation.out(0).to(this.If_.in(0));
         this.If_.out(0).to(this.EditFields.in(0));
         this.If_.out(1).to(this.ReturnResponse.in(0));
 
