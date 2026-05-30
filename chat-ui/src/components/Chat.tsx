@@ -16,6 +16,7 @@ import {
   saveMessages,
   sendChatMessage,
   setHasUploaded,
+  streamChatMessage,
 } from "../services/chatService";
 
 /**
@@ -276,6 +277,10 @@ export default function Chat() {
    * (kirim ulang request yang gagal). Tidak baca state input; semua data
    * datang dari argument supaya bisa dipanggil ulang setelah error.
    *
+   * Menggunakan `streamChatMessage` untuk SSE streaming (ChatGPT-style).
+   * Kalau streaming gagal atau server tidak support SSE, otomatis fallback
+   * ke `sendChatMessage` synchronous.
+   *
    * @param userText  Text yang akan dikirim ke webhook.
    * @param fileToSend  File PDF yang menyertai (atau `null`).
    * @param skipUserMessage  Saat retry, pesan user sudah ada di list dari
@@ -318,64 +323,152 @@ export default function Chat() {
       thinkingTimer = setTimeout(() => setLoadingStage("thinking"), 2200);
     }
 
+    /**
+     * ID pesan assistant yang akan dibuat dan diisi secara progressive.
+     * Dibuat sekarang agar bisa direferensikan di dalam callback onChunk.
+     */
+    const assistantMsgId = genId();
+
+    /**
+     * Track apakah streaming mode berhasil membuat pesan pertama.
+     * Dipakai untuk mendeteksi kalau streaming dimulai tapi kemudian error
+     * di tengah jalan (perlu hapus pesan partial, lalu fallback sync).
+     */
+    let streamingStarted = false;
+    /** Akumulasi total teks yang sudah di-stream (untuk fallback & save). */
+    let streamedText = "";
+
+    const sessionId = getOrCreateSessionId();
+
     try {
-      const sessionId = getOrCreateSessionId();
-      const reply = await sendChatMessage(sessionId, userText, fileToSend);
+      await streamChatMessage(
+        sessionId,
+        userText,
+        fileToSend,
+        {
+          onChunk: (token) => {
+            if (!streamingStarted) {
+              /**
+               * Chunk pertama tiba → sembunyikan ThinkingBubble dan buat
+               * pesan assistant kosong yang akan diisi secara progressive.
+               */
+              streamingStarted = true;
+              setLoadingStage(null);
+              if (indexingTimer) clearTimeout(indexingTimer);
+              if (thinkingTimer) clearTimeout(thinkingTimer);
 
-      /** Tambahkan balasan assistant ke daftar & simpan ke sessionStorage */
-      const assistantMsg: ChatMessage = {
-        id: genId(),
-        role: "assistant",
-        text: reply.output,
-        citations: reply.citations,
-      };
-      setMessages((prev) => {
-        /** Saat retry sukses, hapus pesan error lama supaya bersih. */
-        const cleaned = retryOfErrorId
-          ? prev.filter((m) => m.id !== retryOfErrorId)
-          : prev;
-        const next = [...cleaned, assistantMsg];
-        saveMessages(next);
-        return next;
-      });
+              const initialMsg: ChatMessage = {
+                id: assistantMsgId,
+                role: "assistant",
+                text: token,
+                citations: [],
+              };
+              setMessages((prev) => {
+                const cleaned = retryOfErrorId
+                  ? prev.filter((m) => m.id !== retryOfErrorId)
+                  : prev;
+                return [...cleaned, initialMsg];
+              });
+              streamedText = token;
+            } else {
+              /**
+               * Chunk berikutnya → append ke pesan yang sudah ada.
+               * Pakai functional update agar tidak stale closure.
+               */
+              streamedText += token;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === assistantMsgId ? { ...m, text: streamedText } : m
+                )
+              );
+            }
+          },
 
-      /** Jika ada file yang dikirim, tandai sebagai sudah upload */
-      if (fileToSend) {
-        setHasUploadedState(true);
-        setHasUploaded(true);
-      }
-      /** Sukses → clear snapshot retry. */
-      setLastFailed(null);
-    } catch (error) {
-      /**
-       * Klasifikasi error & tampilkan pesan ramah. Simpan snapshot agar
-       * tombol "Try again" bisa kirim ulang.
-       */
-      const friendly = error instanceof ChatRequestError
-        ? describeError(error)
-        : error instanceof Error
-          ? error.message
-          : "Unknown request error";
-      const errorMsgId = genId();
-      const errorMsg: ChatMessage = {
-        id: errorMsgId,
-        role: "system",
-        text: friendly,
-      };
-      setMessages((prev) => {
-        /** Saat retry gagal lagi, ganti pesan error lama dengan yang baru. */
-        const cleaned = retryOfErrorId
-          ? prev.filter((m) => m.id !== retryOfErrorId)
-          : prev;
-        const next = [...cleaned, errorMsg];
-        saveMessages(next);
-        return next;
-      });
-      /**
-       * Simpan request gagal supaya bisa di-retry. Kalau retry, gunakan
-       * userMsgId yang sama (pesan user tidak digandakan).
-       */
-      setLastFailed({ errorMsgId, text: userText, file: fileToSend });
+          onDone: (citations) => {
+            /**
+             * Stream selesai → simpan pesan final ke sessionStorage dan
+             * attach citations (kalau ada).
+             */
+            setMessages((prev) => {
+              const updated = prev.map((m) =>
+                m.id === assistantMsgId
+                  ? { ...m, text: streamedText, citations }
+                  : m
+              );
+              saveMessages(updated);
+              return updated;
+            });
+
+            if (fileToSend) {
+              setHasUploadedState(true);
+              setHasUploaded(true);
+            }
+            setLastFailed(null);
+          },
+
+          onError: async (streamErr) => {
+            /**
+             * Streaming gagal. Kalau belum ada pesan partial, langsung
+             * fallback ke sendChatMessage synchronous. Kalau sudah ada
+             * pesan partial (stream terputus di tengah), hapus dulu lalu
+             * coba sync.
+             */
+            if (streamingStarted) {
+              /** Hapus pesan partial yang tidak lengkap */
+              setMessages((prev) => prev.filter((m) => m.id !== assistantMsgId));
+              streamingStarted = false;
+              streamedText = "";
+            }
+
+            /** Fallback ke synchronous mode */
+            try {
+              const reply = await sendChatMessage(sessionId, userText, fileToSend);
+              const assistantMsg: ChatMessage = {
+                id: genId(),
+                role: "assistant",
+                text: reply.output,
+                citations: reply.citations,
+              };
+              setMessages((prev) => {
+                const cleaned = retryOfErrorId
+                  ? prev.filter((m) => m.id !== retryOfErrorId)
+                  : prev;
+                const next = [...cleaned, assistantMsg];
+                saveMessages(next);
+                return next;
+              });
+              if (fileToSend) {
+                setHasUploadedState(true);
+                setHasUploaded(true);
+              }
+              setLastFailed(null);
+            } catch (syncError) {
+              /** Fallback juga gagal → tampilkan error ke user */
+              const friendly =
+                syncError instanceof ChatRequestError
+                  ? describeError(syncError)
+                  : syncError instanceof Error
+                    ? syncError.message
+                    : `Streaming error: ${streamErr.message}`;
+              const errorMsgId = genId();
+              const errorMsg: ChatMessage = {
+                id: errorMsgId,
+                role: "system",
+                text: friendly,
+              };
+              setMessages((prev) => {
+                const cleaned = retryOfErrorId
+                  ? prev.filter((m) => m.id !== retryOfErrorId)
+                  : prev;
+                const next = [...cleaned, errorMsg];
+                saveMessages(next);
+                return next;
+              });
+              setLastFailed({ errorMsgId, text: userText, file: fileToSend });
+            }
+          },
+        }
+      );
     } finally {
       /** Bersihkan timer + matikan bubble loading */
       if (indexingTimer) clearTimeout(indexingTimer);

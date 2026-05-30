@@ -260,6 +260,184 @@ export async function sendChatMessage(
   }
 }
 
+/**
+ * Callback-based streaming chat ke webhook n8n.
+ *
+ * Ketika n8n Webhook node dikonfigurasi `responseMode: 'streaming'`, server
+ * mengirim SSE (Server-Sent Events) stream berformat:
+ *   data: {"token": "kata"}\n\n
+ *   data: [DONE]\n\n
+ *
+ * Fungsi ini membaca stream chunk per chunk menggunakan `ReadableStream.getReader()`.
+ * Cocok untuk UX ChatGPT-style (kata muncul satu per satu).
+ *
+ * @param onChunk  Dipanggil setiap kali token baru tiba (string, bisa 1+ kata).
+ * @param onDone   Dipanggil setelah stream selesai (citations bisa kosong di fase awal).
+ * @param onError  Dipanggil kalau ada error network/parsing. UI harus fallback ke sendChatMessage.
+ */
+export async function streamChatMessage(
+  sessionId: string,
+  chatInput: string,
+  file: File | null,
+  callbacks: {
+    onChunk: (token: string) => void;
+    onDone: (citations: Citation[]) => void;
+    onError: (err: ChatRequestError) => void;
+  },
+  options: { signal?: AbortSignal } = {}
+): Promise<void> {
+  const { onChunk, onDone, onError } = callbacks;
+
+  const formData = new FormData();
+  formData.append("sessionId", sessionId);
+  formData.append("chatInput", chatInput);
+  if (file) formData.append("data", file);
+
+  const abortCtrl = new AbortController();
+  const onExternalAbort = () => abortCtrl.abort();
+  if (options.signal) {
+    if (options.signal.aborted) {
+      abortCtrl.abort();
+    } else {
+      options.signal.addEventListener("abort", onExternalAbort);
+    }
+  }
+
+  /** Akumulasi sisa teks SSE yang belum diproses (kalau chunk terpotong) */
+  let pendingCitations: Citation[] = [];
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      body: formData,
+      signal: abortCtrl.signal,
+    });
+
+    if (!res.ok) {
+      onError(new ChatRequestError("http", `HTTP ${res.status}: ${res.statusText}`, res.status));
+      return;
+    }
+
+    const contentType = res.headers.get("content-type") || "";
+
+    /**
+     * Kalau server tidak merespons dengan SSE (misal n8n versi lama atau
+     * streaming belum aktif), fallback ke parse JSON biasa.
+     */
+    if (!contentType.includes("text/event-stream") && !contentType.includes("text/plain")) {
+      const payload = contentType.includes("application/json")
+        ? await res.json()
+        : await res.text();
+      const reply = extractReply(payload);
+      // Emit seluruh output sekaligus sebagai satu chunk
+      onChunk(reply.output);
+      onDone(reply.citations);
+      return;
+    }
+
+    /**
+     * Baca SSE stream secara streaming menggunakan ReadableStream API.
+     * Setiap chunk bisa berisi satu atau lebih SSE events yang terpisah oleh "\n\n".
+     */
+    if (!res.body) {
+      onError(new ChatRequestError("network", "Response body kosong — streaming tidak didukung server."));
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+    let lastEventType = "message";
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      /**
+       * SSE spec: setiap event dipisahkan oleh "\n\n" (double newline).
+       * Proses semua event yang sudah lengkap, simpan sisa ke buffer.
+       */
+      const parts = buffer.split("\n\n");
+      // Bagian terakhir belum tentu lengkap, simpan kembali ke buffer
+      buffer = parts.pop() ?? "";
+
+      for (const part of parts) {
+        if (!part.trim()) continue;
+
+        const lines = part.split("\n");
+        let eventType = "message";
+        let dataLines: string[] = [];
+
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            eventType = line.slice(7).trim();
+            lastEventType = eventType;
+          } else if (line.startsWith("data: ")) {
+            dataLines.push(line.slice(6));
+          }
+        }
+
+        const dataStr = dataLines.join("\n");
+
+        // Sentinel akhir stream
+        if (dataStr === "[DONE]") {
+          onDone(pendingCitations);
+          return;
+        }
+
+        if (!dataStr) continue;
+
+        try {
+          const parsed = JSON.parse(dataStr) as Record<string, unknown>;
+
+          if (lastEventType === "citations" || "citations" in parsed) {
+            // Event citations — kumpulkan, emit saat [DONE]
+            if (Array.isArray(parsed.citations)) {
+              pendingCitations = (parsed as { citations: Citation[] }).citations;
+            }
+          } else if ("token" in parsed && typeof parsed.token === "string") {
+            // Token streaming dari AI Agent
+            onChunk(parsed.token);
+          } else if ("text" in parsed && typeof parsed.text === "string") {
+            // Format alternatif yang mungkin digunakan n8n
+            onChunk(parsed.text);
+          } else if ("output" in parsed && typeof parsed.output === "string") {
+            // Kalau n8n mengirim full output (non-token mode)
+            onChunk(parsed.output);
+          }
+        } catch {
+          // Bukan JSON — mungkin plain text token, emit langsung
+          if (dataStr.trim() && dataStr !== "[DONE]") {
+            onChunk(dataStr);
+          }
+        }
+      }
+    }
+
+    // Stream selesai tanpa sentinel [DONE] — tetap panggil onDone
+    onDone(pendingCitations);
+  } catch (err) {
+    if (err instanceof ChatRequestError) {
+      onError(err);
+      return;
+    }
+    if (err instanceof DOMException && err.name === "AbortError") {
+      onError(new ChatRequestError("timeout", "Request dibatalkan atau melebihi batas waktu."));
+      return;
+    }
+    if (err instanceof TypeError) {
+      onError(new ChatRequestError("network", "Gagal terhubung ke server (jaringan/CORS/proxy memutus koneksi)."));
+      return;
+    }
+    const message = err instanceof Error ? err.message : "Unknown streaming error";
+    onError(new ChatRequestError("unknown", message));
+  } finally {
+    if (options.signal) options.signal.removeEventListener("abort", onExternalAbort);
+  }
+}
+
 /** Simpan riwayat pesan ke sessionStorage (hilang saat tab ditutup) */
 export function saveMessages(messages: ChatMessage[]): void {
   if (typeof window === "undefined") return;

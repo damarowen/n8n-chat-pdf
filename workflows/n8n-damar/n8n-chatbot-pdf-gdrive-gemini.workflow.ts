@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : n8n-chatbot-pdf-gdrive-gemini
-// Nodes   : 21  |  Connections: 12
+// Nodes   : 24  |  Connections: 15
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -28,6 +28,9 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // EditFields                         set
 // If_                                if
 // ReturnResponse                     set
+// RespondSuccess                     respondToWebhook
+// RespondError                       respondToWebhook
+// RespondUpload                      respondToWebhook
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
@@ -40,7 +43,10 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //              → FormatCitation
 //                → If_
 //                  → EditFields
+//                    → RespondError
 //                 .out(1) → ReturnResponse
+//                    → RespondSuccess
+//          → RespondUpload
 // ChatUploadWebhook
 //    → IfFileUploaded
 //      → SupabaseVectorStore (↩ loop)
@@ -62,7 +68,6 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
     name: 'n8n-chatbot-pdf-gdrive-gemini',
     active: true,
     isArchived: false,
-    projectId: 'Fxyw5Gdhf1kinTkH',
     settings: {
         executionOrder: 'v1',
         binaryMode: 'separate',
@@ -80,7 +85,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: "When clicking 'Execute workflow'",
         type: 'n8n-nodes-base.manualTrigger',
         version: 1,
-        position: [-352, -128],
+        position: [-1200, 400],
     })
     WhenClickingExecuteWorkflow = {};
 
@@ -89,7 +94,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: 'Download file',
         type: 'n8n-nodes-base.googleDrive',
         version: 3,
-        position: [-128, -128],
+        position: [-960, 400],
         credentials: { googleDriveOAuth2Api: { id: 'IUhQeIrxHvA2IALs', name: 'Google Drive account' } },
     })
     DownloadFile = {
@@ -109,7 +114,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: 'Supabase Vector Store',
         type: '@n8n/n8n-nodes-langchain.vectorStoreSupabase',
         version: 1,
-        position: [144, -112],
+        position: [-720, 400],
         credentials: { supabaseApi: { id: 'SHnAw3PkW5ikrai0', name: 'Supabase account' } },
     })
     SupabaseVectorStore = {
@@ -128,7 +133,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: 'Embeddings Google Gemini',
         type: '@n8n/n8n-nodes-langchain.embeddingsGoogleGemini',
         version: 1,
-        position: [-48, 192],
+        position: [-960, 640],
         credentials: { googlePalmApi: { id: 'h1z4Jak4KkNu5SQ7', name: 'Google Gemini(PaLM) Api account' } },
     })
     EmbeddingsGoogleGemini = {
@@ -140,7 +145,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: 'Default Data Loader',
         type: '@n8n/n8n-nodes-langchain.documentDefaultDataLoader',
         version: 1,
-        position: [256, 128],
+        position: [-720, 640],
     })
     DefaultDataLoader = {
         dataType: 'binary',
@@ -162,7 +167,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: 'Recursive Character Text Splitter',
         type: '@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter',
         version: 1,
-        position: [368, 304],
+        position: [-720, 880],
     })
     RecursiveCharacterTextSplitter = {
         chunkOverlap: 100,
@@ -174,7 +179,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: 'Sticky Note',
         type: 'n8n-nodes-base.stickyNote',
         version: 1,
-        position: [528, -80],
+        position: [-480, 240],
     })
     StickyNote = {
         content: `SUMMARY: JALUR INGESTION (LIBRARY BUILDER)
@@ -201,7 +206,7 @@ Input: Application/PDF (Binary) -> Process: Parse  -> Split (1000 text) -> Vecto
         name: 'AI Agent',
         type: '@n8n/n8n-nodes-langchain.agent',
         version: 1.6,
-        position: [160, -736],
+        position: [-240, -400],
         onError: 'continueRegularOutput',
     })
     AiAgent = {
@@ -247,7 +252,7 @@ Jika tidak ada dokumen relevan, isi dengan: []`,
         name: 'Format Citation',
         type: 'n8n-nodes-base.code',
         version: 2,
-        position: [336, -736],
+        position: [0, -400],
     })
     FormatCitation = {
         jsCode: `const raw = $input.first().json.output ?? '';
@@ -283,7 +288,7 @@ return [{
         name: 'Google Gemini Chat Model',
         type: '@n8n/n8n-nodes-langchain.lmChatGoogleGemini',
         version: 1,
-        position: [48, -528],
+        position: [-480, -160],
         credentials: { googlePalmApi: { id: 'h1z4Jak4KkNu5SQ7', name: 'Google Gemini(PaLM) Api account' } },
         retryOnFail: true,
     })
@@ -298,7 +303,7 @@ return [{
         name: 'Postgres Chat Memory',
         type: '@n8n/n8n-nodes-langchain.memoryPostgresChat',
         version: 1.2,
-        position: [192, -528],
+        position: [-240, -160],
         credentials: { postgres: { id: 'yoe8aj2syp3VHrNe', name: 'Postgres account' } },
     })
     PostgresChatMemory = {
@@ -310,7 +315,7 @@ return [{
         name: 'Embeddings Google Gemini1',
         type: '@n8n/n8n-nodes-langchain.embeddingsGoogleGemini',
         version: 1,
-        position: [432, -352],
+        position: [240, -160],
         credentials: { googlePalmApi: { id: 'h1z4Jak4KkNu5SQ7', name: 'Google Gemini(PaLM) Api account' } },
     })
     EmbeddingsGoogleGemini1 = {
@@ -322,7 +327,7 @@ return [{
         name: 'Supabase Vector Store1',
         type: '@n8n/n8n-nodes-langchain.vectorStoreSupabase',
         version: 1.3,
-        position: [336, -544],
+        position: [0, -160],
         credentials: { supabaseApi: { id: 'SHnAw3PkW5ikrai0', name: 'Supabase account' } },
     })
     SupabaseVectorStore1 = {
@@ -352,7 +357,7 @@ return [{
         name: 'If File Uploaded',
         type: 'n8n-nodes-base.if',
         version: 2.3,
-        position: [-16, -688],
+        position: [-960, -400],
     })
     IfFileUploaded = {
         conditions: {
@@ -386,12 +391,12 @@ return [{
         name: 'Chat Upload Webhook',
         type: 'n8n-nodes-base.webhook',
         version: 2,
-        position: [-352, -688],
+        position: [-1200, -400],
     })
     ChatUploadWebhook = {
         httpMethod: 'POST',
         path: 'chat-upload',
-        responseMode: 'lastNode',
+        responseMode: 'responseNode',
         options: {},
     };
 
@@ -400,7 +405,7 @@ return [{
         name: 'Upload Acknowledgement',
         type: 'n8n-nodes-base.set',
         version: 3.4,
-        position: [736, -624],
+        position: [-720, -640],
     })
     UploadAcknowledgement = {
         assignments: {
@@ -421,7 +426,7 @@ return [{
         name: 'Prepare For AI',
         type: 'n8n-nodes-base.set',
         version: 3.4,
-        position: [304, -752],
+        position: [-480, -400],
     })
     PrepareForAi = {
         assignments: {
@@ -448,7 +453,7 @@ return [{
         name: 'Sticky Note1',
         type: 'n8n-nodes-base.stickyNote',
         version: 1,
-        position: [688, -448],
+        position: [480, -640],
     })
     StickyNote1 = {
         content: `Trigger: ChatUploadWebhook (POST /webhook/chat-upload)
@@ -471,7 +476,7 @@ Jika error: menampilkan pesan Maaf banget...`,
         name: 'Edit Fields',
         type: 'n8n-nodes-base.set',
         version: 3.4,
-        position: [784, -784],
+        position: [240, -640],
     })
     EditFields = {
         assignments: {
@@ -492,7 +497,7 @@ Jika error: menampilkan pesan Maaf banget...`,
         name: 'If',
         type: 'n8n-nodes-base.if',
         version: 2.3,
-        position: [512, -736],
+        position: [240, -400],
     })
     If_ = {
         conditions: {
@@ -524,7 +529,7 @@ Jika error: menampilkan pesan Maaf banget...`,
         name: 'Return Response',
         type: 'n8n-nodes-base.set',
         version: 3.4,
-        position: [512, -640],
+        position: [480, -400],
     })
     ReturnResponse = {
         assignments: {
@@ -558,6 +563,78 @@ Jika error: menampilkan pesan Maaf banget...`,
         options: {},
     };
 
+    @node({
+        id: 'aa11bb22-cc33-dd44-ee55-ff6677889900',
+        name: 'Respond Success',
+        type: 'n8n-nodes-base.respondToWebhook',
+        version: 1.1,
+        position: [720, -400],
+    })
+    RespondSuccess = {
+        respondWith: 'json',
+        responseBody:
+            '={{ JSON.stringify({ output: $json.output, citations: $json.citations, citationText: $json.citationText, hasCitations: $json.hasCitations }) }}',
+        options: {
+            responseCode: 200,
+            responseHeaders: {
+                entries: [
+                    {
+                        name: 'Content-Type',
+                        value: 'application/json',
+                    },
+                ],
+            },
+        },
+    };
+
+    @node({
+        id: 'bb22cc33-dd44-ee55-ff66-aabb11223344',
+        name: 'Respond Error',
+        type: 'n8n-nodes-base.respondToWebhook',
+        version: 1.1,
+        position: [480, -640],
+    })
+    RespondError = {
+        respondWith: 'json',
+        responseBody:
+            "={{ JSON.stringify({ output: $json.output, citations: [], citationText: '', hasCitations: false }) }}",
+        options: {
+            responseCode: 200,
+            responseHeaders: {
+                entries: [
+                    {
+                        name: 'Content-Type',
+                        value: 'application/json',
+                    },
+                ],
+            },
+        },
+    };
+
+    @node({
+        id: 'cc33dd44-ee55-ff66-aabb-bbcc22334455',
+        name: 'Respond Upload',
+        type: 'n8n-nodes-base.respondToWebhook',
+        version: 1.1,
+        position: [-480, -640],
+    })
+    RespondUpload = {
+        respondWith: 'json',
+        responseBody:
+            "={{ JSON.stringify({ output: $json.output, citations: [], citationText: '', hasCitations: false }) }}",
+        options: {
+            responseCode: 200,
+            responseHeaders: {
+                entries: [
+                    {
+                        name: 'Content-Type',
+                        value: 'application/json',
+                    },
+                ],
+            },
+        },
+    };
+
     // =====================================================================
     // ROUTAGE ET CONNEXIONS
     // =====================================================================
@@ -571,11 +648,14 @@ Jika error: menampilkan pesan Maaf banget...`,
         this.IfFileUploaded.out(1).to(this.PrepareForAi.in(0));
         this.SupabaseVectorStore.out(0).to(this.UploadAcknowledgement.in(0));
         this.UploadAcknowledgement.out(0).to(this.PrepareForAi.in(0));
+        this.UploadAcknowledgement.out(0).to(this.RespondUpload.in(0));
         this.PrepareForAi.out(0).to(this.AiAgent.in(0));
         this.AiAgent.out(0).to(this.FormatCitation.in(0));
         this.FormatCitation.out(0).to(this.If_.in(0));
         this.If_.out(0).to(this.EditFields.in(0));
         this.If_.out(1).to(this.ReturnResponse.in(0));
+        this.ReturnResponse.out(0).to(this.RespondSuccess.in(0));
+        this.EditFields.out(0).to(this.RespondError.in(0));
 
         this.SupabaseVectorStore.uses({
             ai_embedding: this.EmbeddingsGoogleGemini.output,
