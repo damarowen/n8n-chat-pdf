@@ -155,6 +155,7 @@ function PageSkeleton() {
             <div className="h-8 w-8 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" />
             <div className="h-4 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
           </div>
+          <div className="h-2.5 w-28 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
           <div className="h-3 w-36 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
         </div>
 
@@ -578,6 +579,7 @@ export default function Chat() {
             </div>
             <span className="text-base font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Aksara</span>
           </div>
+          <p className="text-[10px] italic text-zinc-400 dark:text-zinc-500">Aksara: define your documents better than anything else</p>
           <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
             <span>by</span>
             <span className="font-medium text-zinc-500 dark:text-zinc-400">Damar Owen</span>
