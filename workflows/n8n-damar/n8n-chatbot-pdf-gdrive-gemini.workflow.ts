@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : n8n-chatbot-pdf-gdrive-gemini
-// Nodes   : 24  |  Connections: 15
+// Nodes   : 24  |  Connections: 16
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -10,6 +10,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // WhenClickingExecuteWorkflow        manualTrigger
 // DownloadFile                       googleDrive                [creds]
 // SupabaseVectorStore                vectorStoreSupabase        [AI] [creds]
+// StartChat                          set
+// GateAfterInsert                    merge
 // EmbeddingsGoogleGemini             embeddingsGoogleGemini     [creds] [ai_embedding]
 // DefaultDataLoader                  documentDefaultDataLoader  [AI] [ai_document]
 // RecursiveCharacterTextSplitter     textSplitterRecursiveCharacterTextSplitter [ai_textSplitter]
@@ -22,7 +24,6 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // SupabaseVectorStore1               vectorStoreSupabase        [AI] [creds] [ai_tool]
 // IfFileUploaded                     if
 // ChatUploadWebhook                  webhook
-// UploadAcknowledgement              set
 // PrepareForAi                       set
 // StickyNote1                        stickyNote
 // EditFields                         set
@@ -30,14 +31,13 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // ReturnResponse                     set
 // RespondSuccess                     respondToWebhook
 // RespondError                       respondToWebhook
-// RespondUpload                      respondToWebhook
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
 // WhenClickingExecuteWorkflow
 //    → DownloadFile
 //      → SupabaseVectorStore
-//        → UploadAcknowledgement
+//        → GateAfterInsert
 //          → PrepareForAi
 //            → AiAgent
 //              → FormatCitation
@@ -46,10 +46,11 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 //                    → RespondError
 //                 .out(1) → ReturnResponse
 //                    → RespondSuccess
-//          → RespondUpload
 // ChatUploadWebhook
 //    → IfFileUploaded
 //      → SupabaseVectorStore (↩ loop)
+//      → StartChat
+//        → GateAfterInsert.in(1) (↩ loop)
 //     .out(1) → PrepareForAi (↩ loop)
 //
 // AI CONNECTIONS
@@ -114,7 +115,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         name: 'Supabase Vector Store',
         type: '@n8n/n8n-nodes-langchain.vectorStoreSupabase',
         version: 1,
-        position: [-720, 400],
+        position: [-800, 368],
         credentials: { supabaseApi: { id: 'SHnAw3PkW5ikrai0', name: 'Supabase account' } },
     })
     SupabaseVectorStore = {
@@ -126,6 +127,45 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
             cachedResultName: 'documents',
         },
         options: {},
+    };
+
+    @node({
+        id: 's7a8r9t0-c1h2a3t4-5678-90ab-cdef12345678',
+        name: 'Start Chat',
+        type: 'n8n-nodes-base.set',
+        version: 3.4,
+        position: [-720, -208],
+    })
+    StartChat = {
+        assignments: {
+            assignments: [
+                {
+                    id: 'sc-001',
+                    name: 'sessionId',
+                    value: '={{ $("Chat Upload Webhook").item.json.body.sessionId }}',
+                    type: 'string',
+                },
+                {
+                    id: 'sc-002',
+                    name: 'chatInput',
+                    value: '={{ $("Chat Upload Webhook").item.json.body.chatInput?.trim() ? $("Chat Upload Webhook").item.json.body.chatInput : "Please provide a comprehensive digest summary of this document, including key topics, main points, and important details." }}',
+                    type: 'string',
+                },
+            ],
+        },
+        options: {},
+    };
+
+    @node({
+        id: 'g8a9t0e1-a2f3t4e5-r678-90ab-cdef23456789',
+        name: 'Gate After Insert',
+        type: 'n8n-nodes-base.merge',
+        version: 3,
+        position: [-608, 0],
+    })
+    GateAfterInsert = {
+        mode: 'chooseBranch',
+        useDataOfInput: 2,
     };
 
     @node({
@@ -150,6 +190,8 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
     DefaultDataLoader = {
         dataType: 'binary',
         binaryMode: 'specificField',
+        loader: 'pdfLoader',
+        binaryDataKey: 'data',
         options: {
             metadata: {
                 metadataValues: [
@@ -199,6 +241,7 @@ Purpose: Sinkronisasi resume ke Vector Store untuk basis pengetahuan AI.
 Input: Application/PDF (Binary) -> Process: Parse  -> Split (1000 text) -> Vectorize -> Output: Vector Record (Supabase).`,
         height: 336,
         width: 592,
+        color: 1,
     };
 
     @node({
@@ -210,6 +253,7 @@ Input: Application/PDF (Binary) -> Process: Parse  -> Split (1000 text) -> Vecto
         onError: 'continueRegularOutput',
     })
     AiAgent = {
+        text: '={{ $json.chatInput }}',
         options: {
             systemMessage: `Anda adalah Asisten Virtual yang menjawab pertanyaan berdasarkan dokumen PDF yang diupload user pada sesi ini.
 
@@ -288,7 +332,7 @@ return [{
         name: 'Google Gemini Chat Model',
         type: '@n8n/n8n-nodes-langchain.lmChatGoogleGemini',
         version: 1,
-        position: [-480, -160],
+        position: [-336, 0],
         credentials: { googlePalmApi: { id: 'h1z4Jak4KkNu5SQ7', name: 'Google Gemini(PaLM) Api account' } },
         retryOnFail: true,
     })
@@ -303,10 +347,12 @@ return [{
         name: 'Postgres Chat Memory',
         type: '@n8n/n8n-nodes-langchain.memoryPostgresChat',
         version: 1.2,
-        position: [-240, -160],
+        position: [-160, -144],
         credentials: { postgres: { id: 'yoe8aj2syp3VHrNe', name: 'Postgres account' } },
     })
     PostgresChatMemory = {
+        sessionIdType: 'customKey',
+        sessionKey: '={{ $json.sessionId }}',
         tableName: 'chat_history',
     };
 
@@ -401,27 +447,6 @@ return [{
     };
 
     @node({
-        id: 'd9a0b1c2-3d4e-5f60-a7b8-91c2d3e4f5a6',
-        name: 'Upload Acknowledgement',
-        type: 'n8n-nodes-base.set',
-        version: 3.4,
-        position: [-720, -640],
-    })
-    UploadAcknowledgement = {
-        assignments: {
-            assignments: [
-                {
-                    id: 'b1a2c3d4-e5f6-47a8-9123-4567890abcde',
-                    name: 'output',
-                    value: 'Your file was uploaded and indexed. You can now ask questions about it.',
-                    type: 'string',
-                },
-            ],
-        },
-        options: {},
-    };
-
-    @node({
         id: 'a4b5c6d7-e8f9-0a1b-2c3d-4e5f6a7b8c9d',
         name: 'Prepare For AI',
         type: 'n8n-nodes-base.set',
@@ -432,13 +457,13 @@ return [{
         assignments: {
             assignments: [
                 {
-                    id: 'c9d0e1f2-3a4b-5c6d-7e8f-9a0b1c2d3e4f',
+                    id: 'e5d6d10d-c0d6-48a5-936d-370ad9625376',
                     name: 'chatInput',
                     value: '={{ $("Chat Upload Webhook").item.json.body.chatInput }}',
                     type: 'string',
                 },
                 {
-                    id: 'f0a1b2c3-d4e5-6f78-9abc-def012345678',
+                    id: '86ea0b82-46ae-4d6a-bb4a-10f5a4a1749f',
                     name: 'sessionId',
                     value: '={{ $("Chat Upload Webhook").item.json.body.sessionId }}',
                     type: 'string',
@@ -469,6 +494,7 @@ Final Answer: Google Gemini 2.5 Flash menyusun jawaban dari context yang ditemuk
 Jika error: menampilkan pesan Maaf banget...`,
         height: 352,
         width: 608,
+        color: 1,
     };
 
     @node({
@@ -611,30 +637,6 @@ Jika error: menampilkan pesan Maaf banget...`,
         },
     };
 
-    @node({
-        id: 'cc33dd44-ee55-ff66-aabb-bbcc22334455',
-        name: 'Respond Upload',
-        type: 'n8n-nodes-base.respondToWebhook',
-        version: 1.1,
-        position: [-480, -640],
-    })
-    RespondUpload = {
-        respondWith: 'json',
-        responseBody:
-            "={{ JSON.stringify({ output: $json.output, citations: [], citationText: '', hasCitations: false }) }}",
-        options: {
-            responseCode: 200,
-            responseHeaders: {
-                entries: [
-                    {
-                        name: 'Content-Type',
-                        value: 'application/json',
-                    },
-                ],
-            },
-        },
-    };
-
     // =====================================================================
     // ROUTAGE ET CONNEXIONS
     // =====================================================================
@@ -645,10 +647,11 @@ Jika error: menampilkan pesan Maaf banget...`,
         this.DownloadFile.out(0).to(this.SupabaseVectorStore.in(0));
         this.ChatUploadWebhook.out(0).to(this.IfFileUploaded.in(0));
         this.IfFileUploaded.out(0).to(this.SupabaseVectorStore.in(0));
+        this.IfFileUploaded.out(0).to(this.StartChat.in(0));
         this.IfFileUploaded.out(1).to(this.PrepareForAi.in(0));
-        this.SupabaseVectorStore.out(0).to(this.UploadAcknowledgement.in(0));
-        this.UploadAcknowledgement.out(0).to(this.PrepareForAi.in(0));
-        this.UploadAcknowledgement.out(0).to(this.RespondUpload.in(0));
+        this.SupabaseVectorStore.out(0).to(this.GateAfterInsert.in(0));
+        this.StartChat.out(0).to(this.GateAfterInsert.in(1));
+        this.GateAfterInsert.out(0).to(this.PrepareForAi.in(0));
         this.PrepareForAi.out(0).to(this.AiAgent.in(0));
         this.AiAgent.out(0).to(this.FormatCitation.in(0));
         this.FormatCitation.out(0).to(this.If_.in(0));

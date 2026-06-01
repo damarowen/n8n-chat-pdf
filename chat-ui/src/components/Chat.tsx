@@ -20,6 +20,27 @@ import {
 } from "../services/chatService";
 
 /**
+ * Memotong nama file yang panjang agar tampil lebih rapi di UI.
+ *
+ * @param name - Nama file asli yang akan dipotong.
+ * @param maxLen - Panjang maksimal karakter yang ditampilkan (default: 30).
+ * @returns Nama file yang sudah dipotong dengan "..." + ekstensi jika melebihi maxLen.
+ *
+ * @example
+ * // Kembali: "Screenshot-2026...52.png"
+ * truncateFilename("Screenshot-2026-06-01-at-22.00.52.png")
+ */
+function truncateFilename(name: string, maxLen = 30): string {
+  if (name.length <= maxLen) return name;
+  const dot = name.lastIndexOf(".");
+  const ext = dot !== -1 ? name.slice(dot) : "";
+  // Minimal ekstensi + "..." masih muat
+  const keep = maxLen - ext.length - 3;
+  if (keep < 4) return name.slice(0, maxLen - 3) + "...";
+  return name.slice(0, keep) + "..." + ext;
+}
+
+/**
  * Snapshot request terakhir yang gagal — disimpan agar tombol "Try again"
  * di pesan error bisa mengulang request yang sama persis.
  */
@@ -76,6 +97,13 @@ const STAGE_LABELS: Record<Exclude<LoadingStage, null>, string> = {
 const STAGE_HINTS: Partial<Record<Exclude<LoadingStage, null>, string>> = {
   indexing: "Upload pertama bisa memakan waktu hingga 5 menit. Mohon jangan tutup tab.",
 };
+
+/**
+ * Prompt default saat user meng-upload PDF tanpa mengetik pesan.
+ * Digunakan untuk meminta AI membuat ringkasan dokumen secara otomatis.
+ */
+const DEFAULT_SUMMARY_PROMPT =
+  "Buatkan ringkasan lengkap dari dokumen PDF ini, termasuk topik utama, poin-poin penting, dan detail relevan lainnya.";
 
 /**
  * Bubble assistant "thinking" — 3 titik bounce + label tahap.
@@ -269,7 +297,7 @@ export default function Chat() {
   const canSend = useMemo(() => {
     if (loading) return false;
     const hasText = input.trim().length > 0;
-    return hasUploaded ? hasText : hasText && !!file;
+    return hasUploaded ? hasText : hasText || !!file;
   }, [input, file, loading, hasUploaded]);
 
   /**
@@ -301,7 +329,7 @@ export default function Chat() {
       const userMsg: ChatMessage = {
         id: genId(),
         role: "user",
-        text: userText || (fileToSend ? `Uploaded file: ${fileToSend.name}` : "(empty message)"),
+        text: userText || (fileToSend ? `📄 ${truncateFilename(fileToSend.name)} — meminta ringkasan` : ""),
       };
       setMessages((prev) => {
         const next = [...prev, userMsg];
@@ -340,10 +368,16 @@ export default function Chat() {
 
     const sessionId = getOrCreateSessionId();
 
+    /**
+     * Tentukan prompt yang dikirim ke AI.
+     * Kalau user upload file tanpa text → pakai DEFAULT_SUMMARY_PROMPT.
+     */
+    const promptToSend = userText || (fileToSend ? DEFAULT_SUMMARY_PROMPT : "");
+
     try {
       await streamChatMessage(
         sessionId,
-        userText,
+        promptToSend,
         fileToSend,
         {
           onChunk: (token) => {
@@ -422,7 +456,7 @@ export default function Chat() {
 
             /** Fallback ke synchronous mode */
             try {
-              const reply = await sendChatMessage(sessionId, userText, fileToSend);
+              const reply = await sendChatMessage(sessionId, promptToSend, fileToSend);
               const assistantMsg: ChatMessage = {
                 id: genId(),
                 role: "assistant",
@@ -611,23 +645,25 @@ export default function Chat() {
         onSubmit={onSubmit}
         className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
       >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              handleSend();
-            }
-          }}
-          placeholder="Type your message..."
-          /**
-           * `text-base` di mobile (≥16px) mencegah iOS Safari auto-zoom
-           * saat input focus. Di ≥sm pakai `text-sm` agar tetap kompak.
-           */
-          className="min-h-24 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-base outline-none ring-blue-500 focus:ring-2 sm:text-sm dark:border-zinc-700 dark:bg-zinc-950"
-          disabled={loading}
-        />
+        {hasUploaded ? (
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Type your message..."
+            /**
+             * `text-base` di mobile (≥16px) mencegah iOS Safari auto-zoom
+             * saat input focus. Di ≥sm pakai `text-sm` agar tetap kompak.
+             */
+            className="min-h-24 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-base outline-none ring-blue-500 focus:ring-2 sm:text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            disabled={loading}
+          />
+        ) : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:justify-between">
           {!hasUploaded ? (
@@ -660,8 +696,11 @@ export default function Chat() {
                   </svg>
                 </span>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-medium text-emerald-900 dark:text-emerald-100">
-                    {file.name}
+                  <span
+                    className="truncate font-medium text-emerald-900 dark:text-emerald-100"
+                    title={file.name}
+                  >
+                    {truncateFilename(file.name)}
                   </span>
                   <span className="text-xs text-emerald-700/80 dark:text-emerald-300/80">
                     {(file.size / 1024).toFixed(1)} KB · Ready to upload
@@ -769,23 +808,25 @@ export default function Chat() {
             </div>
           )}
 
-          <button
-            type="submit"
-            disabled={!canSend}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loadingStage ? (
-              <>
-                <span
-                  className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
-                  aria-hidden="true"
-                />
-                <span>{STAGE_LABELS[loadingStage]}</span>
-              </>
-            ) : (
-              <span>{hasUploaded ? "Ask" : "Upload & Send"}</span>
-            )}
-          </button>
+          {hasUploaded || file ? (
+            <button
+              type="submit"
+              disabled={!canSend}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loadingStage ? (
+                <>
+                  <span
+                    className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                    aria-hidden="true"
+                  />
+                  <span>{STAGE_LABELS[loadingStage]}</span>
+                </>
+              ) : (
+                <span>{hasUploaded ? "Ask" : "Upload PDF"}</span>
+              )}
+            </button>
+          ) : null}
         </div>
       </form>
     </div>
