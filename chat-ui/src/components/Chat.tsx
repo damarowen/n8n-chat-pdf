@@ -145,20 +145,18 @@ function ThinkingBubble({ stage }: { stage: Exclude<LoadingStage, null> }) {
 function PageSkeleton() {
   return (
     <div
-      className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 py-6 sm:px-6"
+      className="flex min-h-dvh flex-col bg-zinc-100 dark:bg-zinc-950"
       aria-hidden="true"
     >
-      {/* Header skeleton */}
-      <div className="mb-4 flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex flex-col gap-2">
-          <div className="h-5 w-48 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
-          <div className="h-3 w-32 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-6 sm:px-6">
+        {/* Header skeleton */}
+        <div className="mb-6 flex items-center justify-center gap-2">
+          <div className="h-7 w-7 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" />
+          <div className="h-4 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
         </div>
-        <div className="h-7 w-20 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />
-      </div>
 
-      {/* Chat area skeleton — bubble bervariasi */}
-      <section className="mb-4 flex flex-1 flex-col gap-3 overflow-hidden rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        {/* Chat area skeleton — bubble bervariasi */}
+        <section className="mb-3 flex flex-1 flex-col gap-3 overflow-hidden rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900">
         <div className="mr-auto w-1/2 animate-pulse rounded-xl bg-zinc-100 px-3 py-2 dark:bg-zinc-800">
           <div className="h-3 w-3/4 rounded bg-zinc-200 dark:bg-zinc-700" />
         </div>
@@ -174,12 +172,13 @@ function PageSkeleton() {
       </section>
 
       {/* Form input skeleton — textarea + dropzone + button */}
-      <div className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <div className="space-y-3 rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900">
         <div className="h-24 w-full animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />
         <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:justify-between">
           <div className="h-12 flex-1 animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-800" />
           <div className="h-12 w-full animate-pulse rounded-xl bg-zinc-200 sm:w-36 dark:bg-zinc-700" />
         </div>
+      </div>
       </div>
     </div>
   );
@@ -260,6 +259,9 @@ export default function Chat() {
   /** Ref ke bottom marker di list pesan — dipakai untuk auto-scroll ke bawah. */
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
+  /** Ref ke textarea — dipakai untuk auto-focus setelah upload selesai. */
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
   /**
    * Auto-scroll ke bawah setiap kali jumlah pesan / state loading berubah.
    * Penting di mobile karena viewport sempit & user pakai 1 jempol.
@@ -292,6 +294,16 @@ export default function Chat() {
   }
 
   const { hasUploaded, messages } = chatState;
+
+  /**
+   * Auto-focus ke textarea setiap kali hasUploaded berubah jadi true.
+   * Memudahkan user langsung ngetik pertanyaan setelah upload selesai.
+   */
+  useEffect(() => {
+    if (hasUploaded) {
+      textareaRef.current?.focus();
+    }
+  }, [hasUploaded]);
 
   /** Validasi tombol send — wajib ada text, sebelum upload wajib ada file juga */
   const canSend = useMemo(() => {
@@ -434,6 +446,7 @@ export default function Chat() {
             });
 
             if (fileToSend) {
+              setFile(null);
               setHasUploadedState(true);
               setHasUploaded(true);
             }
@@ -472,6 +485,7 @@ export default function Chat() {
                 return next;
               });
               if (fileToSend) {
+                setFile(null);
                 setHasUploadedState(true);
                 setHasUploaded(true);
               }
@@ -518,7 +532,6 @@ export default function Chat() {
     const fileToSend = file;
     /** Reset input segera agar kolom chat langsung kosong */
     setInput("");
-    setFile(null);
     /** Kirim pesan baru → clear snapshot retry sebelumnya. */
     setLastFailed(null);
     await performSend(userText, fileToSend);
@@ -553,30 +566,16 @@ export default function Chat() {
   }
 
   return (
-    <div className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col px-4 py-6 sm:px-6">
-      <header className="mb-4 flex items-center justify-between rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-        <div>
-          <h1 className="text-xl font-semibold">n8n Chat + PDF Upload</h1>
-          <p className="text-sm text-zinc-600 dark:text-zinc-300">
-            Session: <span className="font-mono">browser-managed</span>
-          </p>
+    <div className="flex min-h-dvh flex-col bg-zinc-100 dark:bg-zinc-950">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-6 sm:px-6">
+        <div className="mb-6 flex items-center justify-center gap-2">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white">
+            A
+          </div>
+          <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">AskMyPdf</span>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            clearMessages();
-            setChatState(initialState);
-            setHasUploaded(false);
-            setInput("");
-            setFile(null);
-          }}
-          className="min-h-11 rounded-lg border border-zinc-300 px-3 py-2 text-xs font-medium text-zinc-600 hover:bg-zinc-100 sm:min-h-0 sm:py-1.5 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
-          Clear Chat
-        </button>
-      </header>
 
-      <section className="mb-4 flex-1 space-y-3 overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+        <section className="mb-3 flex-1 space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900">
         {messages.map((msg) => {
           /**
            * Tampilkan tombol "Try again" hanya pada pesan error yang
@@ -643,10 +642,11 @@ export default function Chat() {
 
       <form
         onSubmit={onSubmit}
-        className="space-y-3 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+        className="space-y-3 rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900"
       >
         {hasUploaded ? (
           <textarea
+            ref={textareaRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -745,10 +745,10 @@ export default function Chat() {
                     setFile(dropped);
                   }
                 }}
-                className="group flex flex-1 cursor-pointer items-center gap-3 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/60 px-3 py-2.5 text-sm transition hover:border-blue-400 hover:bg-blue-50/60 data-[dragging=true]:border-blue-500 data-[dragging=true]:bg-blue-50 dark:border-zinc-700 dark:bg-zinc-950/40 dark:hover:border-blue-500 dark:hover:bg-blue-950/30 dark:data-[dragging=true]:bg-blue-950/40"
+                className="group flex w-full cursor-pointer flex-col items-center gap-4 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/60 px-6 py-10 text-sm transition-all hover:border-blue-400 hover:bg-blue-50/60 data-[dragging=true]:scale-[1.02] data-[dragging=true]:border-blue-500 data-[dragging=true]:bg-blue-50 data-[dragging=true]:shadow-lg dark:border-zinc-700 dark:bg-zinc-950/40 dark:hover:border-blue-500 dark:hover:bg-blue-950/30 dark:data-[dragging=true]:bg-blue-950/40"
               >
                 <span
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-100 text-blue-600 transition group-hover:scale-110 dark:bg-blue-900/40 dark:text-blue-300"
+                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 shadow-sm transition group-hover:scale-110 group-hover:shadow-md group-hover:bg-blue-200 data-[dragging=true]:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:group-hover:bg-blue-800/50 dark:data-[dragging=true]:bg-blue-800/50"
                   aria-hidden="true"
                 >
                   <svg
@@ -756,22 +756,25 @@ export default function Chat() {
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2"
+                    strokeWidth="1.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
-                    className="h-5 w-5"
+                    className="h-7 w-7"
                   >
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                     <polyline points="17 8 12 3 7 8" />
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                 </span>
-                <div className="flex flex-col leading-tight">
-                  <span className="font-medium text-zinc-800 dark:text-zinc-100">
-                    Upload PDF
+                <div className="flex flex-col items-center gap-1 leading-tight">
+                  <span className="text-base font-semibold text-zinc-800 dark:text-zinc-100">
+                    Upload your PDF
                   </span>
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Click or drag &amp; drop · PDF only
+                  <span className="text-sm text-zinc-500 dark:text-zinc-400">
+                    Click to browse or drag &amp; drop your file here
+                  </span>
+                  <span className="mt-1 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-600 group-hover:border-blue-300 group-hover:text-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:group-hover:border-blue-600 dark:group-hover:text-blue-400">
+                    Choose File
                   </span>
                 </div>
                 <input
@@ -829,6 +832,7 @@ export default function Chat() {
           ) : null}
         </div>
       </form>
+    </div>
     </div>
   );
 }
