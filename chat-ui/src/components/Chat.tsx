@@ -150,9 +150,12 @@ function PageSkeleton() {
     >
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-6 sm:px-6">
         {/* Header skeleton */}
-        <div className="mb-6 flex items-center justify-center gap-2">
-          <div className="h-7 w-7 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" />
-          <div className="h-4 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" />
+            <div className="h-4 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
+          </div>
+          <div className="h-3 w-36 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
         </div>
 
         {/* Chat area skeleton — bubble bervariasi */}
@@ -568,11 +571,19 @@ export default function Chat() {
   return (
     <div className="flex min-h-dvh flex-col bg-zinc-100 dark:bg-zinc-950">
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-6 sm:px-6">
-        <div className="mb-6 flex items-center justify-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white">
-            A
+        <div className="mb-8 flex flex-col items-center gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white shadow-sm">
+              A
+            </div>
+            <span className="text-base font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">AskMyPdf</span>
           </div>
-          <span className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">AskMyPdf</span>
+          <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
+            <span>by</span>
+            <span className="font-medium text-zinc-500 dark:text-zinc-400">Damar Owen</span>
+            <span className="h-3 w-px bg-zinc-300 dark:bg-zinc-700" />
+            <span>n8n-as-code</span>
+          </div>
         </div>
 
         <section className="mb-3 flex-1 space-y-3 overflow-y-auto rounded-xl bg-white p-4 shadow-sm dark:bg-zinc-900">
