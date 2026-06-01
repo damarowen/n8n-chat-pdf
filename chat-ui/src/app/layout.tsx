@@ -26,7 +26,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AskMyPdf",
+  title: "Aksara",
   description: "Chat with your PDF documents using AI — by Damar Owen",
   icons: {
     icon: "/favicon.svg",

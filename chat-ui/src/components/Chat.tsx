@@ -576,7 +576,7 @@ export default function Chat() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white shadow-sm">
               A
             </div>
-            <span className="text-base font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">AskMyPdf</span>
+            <span className="text-base font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Aksara</span>
           </div>
           <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
             <span>by</span>
