@@ -26,8 +26,11 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "n8n Chat + PDF Upload",
-  description: "Chat with your PDF documents using n8n workflows",
+  title: "AskMyPdf",
+  description: "Chat with your PDF documents using AI — by Damar Owen",
+  icons: {
+    icon: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
