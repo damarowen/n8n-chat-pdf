@@ -151,11 +151,11 @@ function PageSkeleton() {
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-6 sm:px-6">
         {/* Header skeleton */}
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 animate-pulse rounded-lg bg-zinc-200 dark:bg-zinc-700" />
-            <div className="h-4 w-20 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 animate-pulse bg-zinc-200 dark:bg-zinc-700" style={{ clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)' }} />
+            <div className="h-5 w-24 animate-pulse rounded bg-zinc-200 dark:bg-zinc-700" />
           </div>
-          <div className="h-2.5 w-28 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
+          <div className="h-3 w-32 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
           <div className="h-3 w-36 animate-pulse rounded bg-zinc-100 dark:bg-zinc-800" />
         </div>
 
@@ -164,9 +164,9 @@ function PageSkeleton() {
         <div className="mr-auto w-1/2 animate-pulse rounded-xl bg-zinc-100 px-3 py-2 dark:bg-zinc-800">
           <div className="h-3 w-3/4 rounded bg-zinc-200 dark:bg-zinc-700" />
         </div>
-        <div className="ml-auto w-2/3 animate-pulse rounded-xl bg-blue-100 px-3 py-2 dark:bg-blue-900/40">
-          <div className="mb-1.5 h-3 w-full rounded bg-blue-200 dark:bg-blue-800/60" />
-          <div className="h-3 w-1/2 rounded bg-blue-200 dark:bg-blue-800/60" />
+        <div className="ml-auto w-2/3 animate-pulse rounded-xl bg-red-100 px-3 py-2 dark:bg-red-900/40">
+          <div className="mb-1.5 h-3 w-full rounded bg-red-200 dark:bg-red-800/60" />
+          <div className="h-3 w-1/2 rounded bg-red-200 dark:bg-red-800/60" />
         </div>
         <div className="mr-auto w-3/4 animate-pulse rounded-xl bg-zinc-100 px-3 py-2 dark:bg-zinc-800">
           <div className="mb-1.5 h-3 w-full rounded bg-zinc-200 dark:bg-zinc-700" />
@@ -573,13 +573,18 @@ export default function Chat() {
     <div className="flex min-h-dvh flex-col bg-zinc-100 dark:bg-zinc-950">
       <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 py-6 sm:px-6">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-600 text-xs font-bold text-white shadow-sm">
-              A
+          <div className="flex items-center gap-3">
+            <div className="flex h-12 w-12 items-center justify-center bg-red-500 text-white shadow-md" style={{ clipPath: 'polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%)' }}>
+              <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 3h8l4 4v13a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+                <polyline points="14 3 14 7 18 7" />
+                <circle cx="11" cy="11" r="1" fill="currentColor" />
+                <path d="M9 14a2 2 0 0 1 4 0c0 1.5-2 2-2 2" />
+              </svg>
             </div>
-            <span className="text-base font-semibold tracking-tight text-zinc-800 dark:text-zinc-100">Aksara</span>
+            <span className="text-xl font-bold tracking-tight text-zinc-800 dark:text-zinc-100">askingpdf.</span>
           </div>
-          <p className="text-[10px] italic text-zinc-400 dark:text-zinc-500">Aksara: define your documents better than anything else</p>
+          <p className="text-xs italic text-zinc-400 dark:text-zinc-500">ask your pdf anything</p>
           <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500">
             <span>by</span>
             <span className="font-medium text-zinc-500 dark:text-zinc-400">Damar Owen</span>
@@ -604,7 +609,7 @@ export default function Chat() {
               <div
                 className={`max-w-[90%] rounded-xl px-3 py-2 text-sm ${
                   msg.role === "user"
-                    ? "ml-auto whitespace-pre-wrap bg-blue-600 text-white"
+                    ? "ml-auto whitespace-pre-wrap bg-red-500 text-white"
                     : msg.role === "assistant"
                       ? "mr-auto bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100"
                       : "mr-auto whitespace-pre-wrap bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200"
@@ -673,7 +678,7 @@ export default function Chat() {
              * `text-base` di mobile (≥16px) mencegah iOS Safari auto-zoom
              * saat input focus. Di ≥sm pakai `text-sm` agar tetap kompak.
              */
-            className="min-h-24 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-base outline-none ring-blue-500 focus:ring-2 sm:text-sm dark:border-zinc-700 dark:bg-zinc-950"
+            className="min-h-24 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-base outline-none ring-red-500 focus:ring-2 sm:text-sm dark:border-zinc-700 dark:bg-zinc-950"
             disabled={loading}
           />
         ) : null}
@@ -758,10 +763,10 @@ export default function Chat() {
                     setFile(dropped);
                   }
                 }}
-                className="group flex w-full cursor-pointer flex-col items-center gap-4 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/60 px-6 py-10 text-sm transition-all hover:border-blue-400 hover:bg-blue-50/60 data-[dragging=true]:scale-[1.02] data-[dragging=true]:border-blue-500 data-[dragging=true]:bg-blue-50 data-[dragging=true]:shadow-lg dark:border-zinc-700 dark:bg-zinc-950/40 dark:hover:border-blue-500 dark:hover:bg-blue-950/30 dark:data-[dragging=true]:bg-blue-950/40"
+                className="group flex w-full cursor-pointer flex-col items-center gap-4 rounded-xl border-2 border-dashed border-zinc-300 bg-zinc-50/60 px-6 py-10 text-sm transition-all hover:border-red-400 hover:bg-red-50/60 data-[dragging=true]:scale-[1.02] data-[dragging=true]:border-red-500 data-[dragging=true]:bg-red-50 data-[dragging=true]:shadow-lg dark:border-zinc-700 dark:bg-zinc-950/40 dark:hover:border-red-500 dark:hover:bg-red-950/30 dark:data-[dragging=true]:bg-red-950/40"
               >
                 <span
-                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-100 text-blue-600 shadow-sm transition group-hover:scale-110 group-hover:shadow-md group-hover:bg-blue-200 data-[dragging=true]:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-300 dark:group-hover:bg-blue-800/50 dark:data-[dragging=true]:bg-blue-800/50"
+                  className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-red-100 text-red-600 shadow-sm transition group-hover:scale-110 group-hover:shadow-md group-hover:bg-red-200 data-[dragging=true]:bg-red-200 dark:bg-red-900/40 dark:text-red-300 dark:group-hover:bg-red-800/50 dark:data-[dragging=true]:bg-red-800/50"
                   aria-hidden="true"
                 >
                   <svg
@@ -786,7 +791,7 @@ export default function Chat() {
                   <span className="text-sm text-zinc-500 dark:text-zinc-400">
                     Click to browse or drag &amp; drop your file here
                   </span>
-                  <span className="mt-1 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-600 group-hover:border-blue-300 group-hover:text-blue-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:group-hover:border-blue-600 dark:group-hover:text-blue-400">
+                  <span className="mt-1 rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs font-medium text-zinc-600 group-hover:border-red-300 group-hover:text-red-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-400 dark:group-hover:border-red-600 dark:group-hover:text-red-400">
                     Choose File
                   </span>
                 </div>
@@ -828,7 +833,7 @@ export default function Chat() {
             <button
               type="submit"
               disabled={!canSend}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {loadingStage ? (
                 <>

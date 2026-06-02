@@ -2,16 +2,14 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : n8n-chatbot-pdf-gdrive-gemini
-// Nodes   : 24  |  Connections: 16
+// Nodes   : 22  |  Connections: 13
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
 // Property name                    Node type (short)         Flags
 // WhenClickingExecuteWorkflow        manualTrigger
 // DownloadFile                       googleDrive                [creds]
-// SupabaseVectorStore                vectorStoreSupabase        [AI] [creds]
-// StartChat                          set
-// GateAfterInsert                    merge
+// SupabaseVectorStore                vectorStoreSupabase        [AI] [creds] [retry]
 // EmbeddingsGoogleGemini             embeddingsGoogleGemini     [creds] [ai_embedding]
 // DefaultDataLoader                  documentDefaultDataLoader  [AI] [ai_document]
 // RecursiveCharacterTextSplitter     textSplitterRecursiveCharacterTextSplitter [ai_textSplitter]
@@ -37,20 +35,17 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // WhenClickingExecuteWorkflow
 //    → DownloadFile
 //      → SupabaseVectorStore
-//        → GateAfterInsert
-//          → PrepareForAi
-//            → AiAgent
-//              → FormatCitation
-//                → If_
-//                  → EditFields
-//                    → RespondError
-//                 .out(1) → ReturnResponse
-//                    → RespondSuccess
+//        → PrepareForAi
+//          → AiAgent
+//            → FormatCitation
+//              → If_
+//                → EditFields
+//                  → RespondError
+//               .out(1) → ReturnResponse
+//                  → RespondSuccess
 // ChatUploadWebhook
 //    → IfFileUploaded
 //      → SupabaseVectorStore (↩ loop)
-//      → StartChat
-//        → GateAfterInsert.in(1) (↩ loop)
 //     .out(1) → PrepareForAi (↩ loop)
 //
 // AI CONNECTIONS
@@ -117,6 +112,7 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         version: 1,
         position: [-800, 368],
         credentials: { supabaseApi: { id: 'SHnAw3PkW5ikrai0', name: 'Supabase account' } },
+        retryOnFail: true,
     })
     SupabaseVectorStore = {
         mode: 'insert',
@@ -127,45 +123,6 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
             cachedResultName: 'documents',
         },
         options: {},
-    };
-
-    @node({
-        id: 's7a8r9t0-c1h2a3t4-5678-90ab-cdef12345678',
-        name: 'Start Chat',
-        type: 'n8n-nodes-base.set',
-        version: 3.4,
-        position: [-720, -208],
-    })
-    StartChat = {
-        assignments: {
-            assignments: [
-                {
-                    id: 'sc-001',
-                    name: 'sessionId',
-                    value: '={{ $("Chat Upload Webhook").item.json.body.sessionId }}',
-                    type: 'string',
-                },
-                {
-                    id: 'sc-002',
-                    name: 'chatInput',
-                    value: '={{ $("Chat Upload Webhook").item.json.body.chatInput?.trim() ? $("Chat Upload Webhook").item.json.body.chatInput : "Please provide a comprehensive digest summary of this document, including key topics, main points, and important details." }}',
-                    type: 'string',
-                },
-            ],
-        },
-        options: {},
-    };
-
-    @node({
-        id: 'g8a9t0e1-a2f3t4e5-r678-90ab-cdef23456789',
-        name: 'Gate After Insert',
-        type: 'n8n-nodes-base.merge',
-        version: 3,
-        position: [-608, 0],
-    })
-    GateAfterInsert = {
-        mode: 'chooseBranch',
-        useDataOfInput: 2,
     };
 
     @node({
@@ -253,7 +210,6 @@ Input: Application/PDF (Binary) -> Process: Parse  -> Split (1000 text) -> Vecto
         onError: 'continueRegularOutput',
     })
     AiAgent = {
-        text: '={{ $json.chatInput }}',
         options: {
             systemMessage: `Anda adalah Asisten Virtual yang menjawab pertanyaan berdasarkan dokumen PDF yang diupload user pada sesi ini.
 
@@ -478,7 +434,7 @@ return [{
         name: 'Sticky Note1',
         type: 'n8n-nodes-base.stickyNote',
         version: 1,
-        position: [480, -640],
+        position: [704, -784],
     })
     StickyNote1 = {
         content: `Trigger: ChatUploadWebhook (POST /webhook/chat-upload)
@@ -523,7 +479,7 @@ Jika error: menampilkan pesan Maaf banget...`,
         name: 'If',
         type: 'n8n-nodes-base.if',
         version: 2.3,
-        position: [240, -400],
+        position: [144, -400],
     })
     If_ = {
         conditions: {
@@ -647,11 +603,8 @@ Jika error: menampilkan pesan Maaf banget...`,
         this.DownloadFile.out(0).to(this.SupabaseVectorStore.in(0));
         this.ChatUploadWebhook.out(0).to(this.IfFileUploaded.in(0));
         this.IfFileUploaded.out(0).to(this.SupabaseVectorStore.in(0));
-        this.IfFileUploaded.out(0).to(this.StartChat.in(0));
         this.IfFileUploaded.out(1).to(this.PrepareForAi.in(0));
-        this.SupabaseVectorStore.out(0).to(this.GateAfterInsert.in(0));
-        this.StartChat.out(0).to(this.GateAfterInsert.in(1));
-        this.GateAfterInsert.out(0).to(this.PrepareForAi.in(0));
+        this.SupabaseVectorStore.out(0).to(this.PrepareForAi.in(0));
         this.PrepareForAi.out(0).to(this.AiAgent.in(0));
         this.AiAgent.out(0).to(this.FormatCitation.in(0));
         this.FormatCitation.out(0).to(this.If_.in(0));
