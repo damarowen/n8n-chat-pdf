@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : n8n-chatbot-pdf-gdrive-gemini
-// Nodes   : 22  |  Connections: 13
+// Nodes   : 24  |  Connections: 13
 //
 // NODE INDEX
 // ──────────────────────────────────────────────────────────────────
@@ -29,6 +29,8 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // ReturnResponse                     set
 // RespondSuccess                     respondToWebhook
 // RespondError                       respondToWebhook
+// DeepseekChatModel                  lmChatDeepSeek             [creds]
+// EmbeddingsHuggingfaceInference     embeddingsHuggingFaceInference [creds]
 //
 // ROUTING MAP
 // ──────────────────────────────────────────────────────────────────
@@ -64,6 +66,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
     name: 'n8n-chatbot-pdf-gdrive-gemini',
     active: true,
     isArchived: false,
+    projectId: 'Fxyw5Gdhf1kinTkH',
     settings: {
         executionOrder: 'v1',
         binaryMode: 'separate',
@@ -148,7 +151,6 @@ export class N8nChatbotPdfGdriveGeminiWorkflow {
         dataType: 'binary',
         binaryMode: 'specificField',
         loader: 'pdfLoader',
-        binaryDataKey: 'data',
         options: {
             metadata: {
                 metadataValues: [
@@ -198,7 +200,6 @@ Purpose: Sinkronisasi resume ke Vector Store untuk basis pengetahuan AI.
 Input: Application/PDF (Binary) -> Process: Parse  -> Split (1000 text) -> Vectorize -> Output: Vector Record (Supabase).`,
         height: 336,
         width: 592,
-        color: 1,
     };
 
     @node({
@@ -288,7 +289,7 @@ return [{
         name: 'Google Gemini Chat Model',
         type: '@n8n/n8n-nodes-langchain.lmChatGoogleGemini',
         version: 1,
-        position: [-336, 0],
+        position: [-448, -192],
         credentials: { googlePalmApi: { id: 'h1z4Jak4KkNu5SQ7', name: 'Google Gemini(PaLM) Api account' } },
         retryOnFail: true,
     })
@@ -450,7 +451,6 @@ Final Answer: Google Gemini 2.5 Flash menyusun jawaban dari context yang ditemuk
 Jika error: menampilkan pesan Maaf banget...`,
         height: 352,
         width: 608,
-        color: 1,
     };
 
     @node({
@@ -591,6 +591,32 @@ Jika error: menampilkan pesan Maaf banget...`,
                 ],
             },
         },
+    };
+
+    @node({
+        id: '60f78fa5-793c-4c0b-a4e0-7027f75a1967',
+        name: 'DeepSeek Chat Model',
+        type: '@n8n/n8n-nodes-langchain.lmChatDeepSeek',
+        version: 1,
+        position: [-320, -96],
+        credentials: { deepSeekApi: { id: 'VqFu1VObmd0GIdVG', name: 'DeepSeek account' } },
+    })
+    DeepseekChatModel = {
+        model: 'deepseek-v4-flash',
+        options: {},
+    };
+
+    @node({
+        id: 'e7df2a43-12d0-4ee8-bc98-f087e1a5088d',
+        name: 'Embeddings HuggingFace Inference',
+        type: '@n8n/n8n-nodes-langchain.embeddingsHuggingFaceInference',
+        version: 1,
+        position: [-1120, 640],
+        credentials: { huggingFaceApi: { id: 'XnSYK40YEjltvMX4', name: 'HuggingFaceApi account' } },
+    })
+    EmbeddingsHuggingfaceInference = {
+        modelName: 'BAAI/bge-m3',
+        options: {},
     };
 
     // =====================================================================
