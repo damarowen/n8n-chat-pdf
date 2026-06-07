@@ -5,7 +5,7 @@ Terraform stack untuk men-deploy `chat-ui/` (Next.js) ke Vercel dengan:
 - ✅ Auto-deploy dari GitHub repo `damarowen/n8n-chat-pdf`
 - ✅ Root directory di-set ke `chat-ui/` (monorepo-aware)
 - ✅ Env var `NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL` injected
-- ✅ Custom domain `chat.damarowen.blog` dengan auto-SSL
+- ✅ Custom domain `askingpdf.damarowen.blog` dengan auto-SSL
 
 ---
 
@@ -68,7 +68,7 @@ Tunggu 1–30 menit. Vercel otomatis issue SSL cert.
 ### 5. Verifikasi
 
 ```bash
-curl -I https://chat.damarowen.blog
+curl -I https://askingpdf.damarowen.blog
 # HTTP/2 200 OK setelah DNS aktif
 ```
 

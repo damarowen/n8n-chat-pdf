@@ -35,7 +35,7 @@ variable "root_directory" {
 variable "custom_domain" {
   type        = string
   description = "Custom domain untuk production deployment."
-  default     = "chat.damarowen.blog"
+  default     = "askingpdf.damarowen.blog"
 }
 
 variable "n8n_chat_webhook_url" {

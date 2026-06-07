@@ -350,7 +350,7 @@ The frontend automatically connects to the live n8n webhook URL defined in `.env
 |-----------|--------|-------|
 | n8n Workflows | External n8n Instance | `https://nein.damarowen.blog` |
 | Next.js Frontend | Vercel (via Terraform) | Provisioned by `infra/` — see [Infrastructure as Code](#infrastructure-as-code-terraform) |
-| Custom Domain | `chat.damarowen.blog` | Managed by `vercel_project_domain` in Terraform |
+| Custom Domain | `askingpdf.damarowen.blog` | Managed by `vercel_project_domain` in Terraform |
 
 ### Deployment Checklist
 
@@ -382,7 +382,7 @@ command. Re-running the command is idempotent (no duplicate resources).
 |----------|---------|
 | `vercel_project.chat_ui` | The Vercel project itself, linked to the GitHub repo `damarowen/n8n-chat-pdf`, with `chat-ui/` as the monorepo root directory and `framework = nextjs` |
 | `vercel_project_environment_variable.n8n_webhook` | Sets `NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL` across all three Vercel environments (production / preview / development) |
-| `vercel_project_domain.custom` | Attaches the custom domain (e.g. `chat.damarowen.blog`) to the project |
+| `vercel_project_domain.custom` | Attaches the custom domain (e.g. `askingpdf.damarowen.blog`) to the project |
 
 After `apply`, Vercel auto-deploys whenever you `git push origin main` — no
 Terraform re-run is needed for code changes. Terraform is only re-run when you
@@ -471,7 +471,7 @@ terraform destroy
 
 ### Changing the Custom Domain
 
-Example: switching from `chat.damarowen.blog` → `pdfaq.damarowen.blog`.
+Example: switching from `askingpdf.damarowen.blog` → `pdfaq.damarowen.blog`.
 
 > Vercel does **not** allow editing a `vercel_project_domain` resource's `domain`
 > field in place — Terraform must detach the old domain and attach the new one.

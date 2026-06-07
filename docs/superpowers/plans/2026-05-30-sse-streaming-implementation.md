@@ -139,7 +139,7 @@ Kalau `responseMode: 'streaming'` tidak bekerja di n8n instance kita (mungkin ve
 - [ ] Test happy path: kirim pesan, lihat streaming
 - [ ] Test error: matikan n8n sementara, pastikan fallback jalan
 - [ ] Commit + push ke `main` → Vercel auto-deploy
-- [ ] Verify di production: `chat.damarowen.blog`
+- [ ] Verify di production: `askingpdf.damarowen.blog`
 
 ## Expected UX Result
 

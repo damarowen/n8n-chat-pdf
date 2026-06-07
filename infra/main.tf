@@ -4,7 +4,7 @@
 # Resource yang dibuat:
 #   1. vercel_project                          — project + GitHub integration
 #   2. vercel_project_environment_variable     — NEXT_PUBLIC_N8N_CHAT_WEBHOOK_URL
-#   3. vercel_project_domain                   — custom domain (chat.damarowen.blog)
+#   3. vercel_project_domain                   — custom domain (askingpdf.damarowen.blog)
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -38,7 +38,7 @@ resource "vercel_project_environment_variable" "n8n_webhook" {
 }
 
 # -----------------------------------------------------------------------------
-# 3. Custom domain — chat.damarowen.blog
+# 3. Custom domain — askingpdf.damarowen.blog
 #    Setelah apply, set CNAME `chat` -> `cname.vercel-dns.com` di DNS provider.
 # -----------------------------------------------------------------------------
 resource "vercel_project_domain" "custom" {
